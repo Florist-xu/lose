@@ -4,3 +4,4 @@ server.log
 .playwright-mcp/
 certs/
 data/
+__pycache__/

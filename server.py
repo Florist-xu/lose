@@ -3,9 +3,9 @@
 - 静态页面 + 视频/音频 Range 请求
 - 训练记录接口,SQLite 存储在 data/workout.db(含每组随机抓拍的图片)
 默认端口: HTTP 6060 (PORT);若存在 certs/ 则同时开 HTTPS 6061 (SPORT)。"""
-import base64, binascii, json, mimetypes, os, re, sqlite3, ssl, threading
+import base64, binascii, ipaddress, json, mimetypes, os, re, socket, sqlite3, ssl, threading, urllib.error, urllib.request
 from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import urlparse, parse_qs, urljoin, unquote
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 PORT = int(os.environ.get('PORT', 6060))
@@ -13,11 +13,18 @@ SPORT = int(os.environ.get('SPORT', 6061))
 DB_PATH = os.environ.get('DB_PATH', os.path.join(ROOT, 'data', 'workout.db'))
 MAX_BODY = 20 * 1024 * 1024
 MAX_IMG = 2 * 1024 * 1024
-PUBLIC = {'index.html', 'app.js', 'templates.json', 'lib', 'media', 'favicon.ico'}  # 只公开这些,certs/data 等不会被下载
+MUSIC_DIR = os.path.join(os.path.dirname(DB_PATH), 'music')   # 用户上传的休息音乐
+MAX_MUSIC = 60 * 1024 * 1024
+MUSIC_EXT = {'mp3', 'm4a', 'aac', 'wav', 'ogg', 'flac', 'mp4'}  # mp4 = 从抖音等保存的视频,只取声音
+CT_EXT = {'audio/mpeg': 'mp3', 'audio/mp3': 'mp3', 'audio/mp4': 'm4a', 'audio/x-m4a': 'm4a', 'audio/aac': 'aac', 'audio/wav': 'wav',
+          'audio/x-wav': 'wav', 'audio/ogg': 'ogg', 'audio/flac': 'flac', 'video/mp4': 'mp4'}
+PUBLIC = {'index.html', 'app.js', 'templates.json', 'lib', 'media', 'favicon.ico', 'music-files'}  # 只公开这些,certs/data 等不会被下载
 mimetypes.add_type('application/wasm', '.wasm')
 mimetypes.add_type('text/javascript', '.mjs')
 mimetypes.add_type('video/mp4', '.mp4')
 mimetypes.add_type('audio/mp4', '.m4a')
+mimetypes.add_type('audio/aac', '.aac')
+mimetypes.add_type('audio/flac', '.flac')
 mimetypes.add_type('application/octet-stream', '.task')
 DAY_RE = re.compile(r'^\d{4}-\d{2}-\d{2}$')
 
@@ -32,6 +39,7 @@ def db():
 
 def init_db():
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+    os.makedirs(MUSIC_DIR, exist_ok=True)
     with db() as c:
         c.executescript('''
         CREATE TABLE IF NOT EXISTS sessions(
@@ -51,6 +59,10 @@ def init_db():
           move_idx INTEGER,                  -- 抓拍时的动作 0~19
           data BLOB NOT NULL);               -- JPEG
         CREATE INDEX IF NOT EXISTS idx_images_session ON images(session_id);
+        CREATE TABLE IF NOT EXISTS music(
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          title TEXT NOT NULL, ext TEXT NOT NULL, size INTEGER NOT NULL, source TEXT,
+          created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')));
         ''')
 
 
@@ -119,6 +131,109 @@ def list_sessions(day):
         return out
 
 
+# ---------------- 休息音乐 ----------------
+def music_row(r):
+    return {'id': r['id'], 'title': r['title'], 'ext': r['ext'], 'size': r['size'], 'url': f"music-files/{r['id']}.{r['ext']}"}
+
+
+def list_music():
+    with db() as c:
+        return [music_row(r) for r in c.execute('SELECT * FROM music ORDER BY id DESC')]
+
+
+def add_music(title, ext, size, source, tmp_path):
+    """tmp_path 已写好的文件 -> 入库并改名为 <id>.<ext>"""
+    title = (title or '未命名').strip()[:60] or '未命名'
+    with db() as c:
+        cur = c.execute('INSERT INTO music(title,ext,size,source) VALUES(?,?,?,?)', (title, ext, size, source))
+        mid = cur.lastrowid
+    os.replace(tmp_path, os.path.join(MUSIC_DIR, f'{mid}.{ext}'))
+    return {'id': mid, 'title': title, 'ext': ext, 'size': size, 'url': f'music-files/{mid}.{ext}'}
+
+
+def delete_music(mid):
+    with db() as c:
+        r = c.execute('SELECT ext FROM music WHERE id=?', (mid,)).fetchone()
+        if not r:
+            return 0
+        c.execute('DELETE FROM music WHERE id=?', (mid,))
+    try:
+        os.remove(os.path.join(MUSIC_DIR, f'{mid}.{r["ext"]}'))
+    except OSError:
+        pass
+    return 1
+
+
+def _check_host(host):
+    """防 SSRF:禁止访问内网/本机地址"""
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except OSError:
+        raise ValueError('无法解析该域名')
+    for i in infos:
+        ip = ipaddress.ip_address(i[4][0])
+        if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast or ip.is_unspecified:
+            raise ValueError('不允许访问内网地址')
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *a, **k):
+        return None  # 手动处理重定向,逐跳检查地址
+
+
+DOUYIN_RE = re.compile(r'(^|\.)(douyin|iesdouyin|tiktok|toutiao)\.com$')
+
+
+def import_music_link(text):
+    """从直接的音频文件链接导入。抖音等平台页面链接受反爬保护,无法自动解析。"""
+    m = re.search(r'https?://[^\s\u3000"\'<>]+', text or '')
+    if not m:
+        raise ValueError('没有找到链接')
+    cur = m.group(0).rstrip('.,;)]}，。')
+    opener = urllib.request.build_opener(_NoRedirect)
+    for _ in range(5):
+        u = urlparse(cur)
+        if u.scheme not in ('http', 'https') or not u.hostname:
+            raise ValueError('链接格式不对')
+        if DOUYIN_RE.search(u.hostname):
+            raise ValueError('抖音/TikTok 的分享链接有反爬保护,无法自动解析。请在抖音里"保存视频"到手机,再点上方"上传音频/视频文件"(mp4 也可以,只会取声音)')
+        _check_host(u.hostname)
+        try:
+            resp = opener.open(urllib.request.Request(cur, headers={'User-Agent': 'Mozilla/5.0'}), timeout=20)
+        except urllib.error.HTTPError as e:
+            loc = e.headers.get('Location')
+            if e.code in (301, 302, 303, 307, 308) and loc:
+                cur = urljoin(cur, loc)
+                continue
+            raise ValueError(f'下载失败(HTTP {e.code})')
+        except (urllib.error.URLError, OSError, ValueError):
+            raise ValueError('下载失败,请检查链接')
+        ct = (resp.headers.get('Content-Type') or '').split(';')[0].strip().lower()
+        ext = CT_EXT.get(ct) or os.path.splitext(u.path)[1].lstrip('.').lower()
+        if ext not in MUSIC_EXT:
+            raise ValueError('这个链接不是音频文件(需要直接指向 mp3/m4a/aac/wav 等文件)')
+        tmp = os.path.join(MUSIC_DIR, f'.tmp_{os.getpid()}_{threading.get_ident()}')
+        size = 0
+        try:
+            with open(tmp, 'wb') as f:
+                while True:
+                    buf = resp.read(65536)
+                    if not buf:
+                        break
+                    size += len(buf)
+                    if size > MAX_MUSIC:
+                        raise ValueError('文件太大(上限 60MB)')
+                    f.write(buf)
+            if size < 1024:
+                raise ValueError('文件太小,不是有效的音频')
+            title = unquote(os.path.splitext(os.path.basename(u.path))[0]) or u.hostname
+            return add_music(title, ext, size, cur[:300], tmp)
+        finally:
+            if os.path.exists(tmp):
+                os.remove(tmp)
+    raise ValueError('重定向次数过多')
+
+
 # ---------------- HTTP ----------------
 class H(SimpleHTTPRequestHandler):
     def __init__(self, *a, **k):
@@ -174,6 +289,41 @@ class H(SimpleHTTPRequestHandler):
                 with db() as c:
                     cur = c.execute('DELETE FROM sessions WHERE id=?', (int(parts[2]),))
                 return self._json({'deleted': cur.rowcount})
+            if method == 'GET' and parts == ['api', 'music']:
+                return self._json(list_music())
+            if method == 'PUT' and parts == ['api', 'music']:
+                name = parse_qs(u.query).get('name', ['未命名'])[0]
+                ext = os.path.splitext(name)[1].lstrip('.').lower()
+                n = int(self.headers.get('Content-Length') or 0)
+                if ext not in MUSIC_EXT:
+                    return self._json({'error': '只支持 mp3 / m4a / aac / wav / ogg / flac / mp4'}, 400)
+                if n < 1024 or n > MAX_MUSIC:
+                    return self._json({'error': '文件大小不合法(1KB ~ 60MB)'}, 413)
+                tmp = os.path.join(MUSIC_DIR, f'.tmp_{os.getpid()}_{threading.get_ident()}')
+                try:
+                    left = n
+                    with open(tmp, 'wb') as f:
+                        while left > 0:
+                            buf = self.rfile.read(min(65536, left))
+                            if not buf:
+                                raise ValueError('上传中断')
+                            f.write(buf)
+                            left -= len(buf)
+                    return self._json(add_music(os.path.splitext(name)[0], ext, n, '上传', tmp), 201)
+                finally:
+                    if os.path.exists(tmp):
+                        os.remove(tmp)
+            if method == 'POST' and parts == ['api', 'music', 'link']:
+                n = int(self.headers.get('Content-Length') or 0)
+                if n <= 0 or n > 10000:
+                    return self._json({'error': '请求体大小不合法'}, 413)
+                try:
+                    body = json.loads(self.rfile.read(n))
+                except ValueError:
+                    return self._json({'error': 'JSON 格式错误'}, 400)
+                return self._json(import_music_link(str(body.get('url', ''))), 201)
+            if method == 'DELETE' and len(parts) == 3 and parts[1] == 'music' and parts[2].isdigit():
+                return self._json({'deleted': delete_music(int(parts[2]))})
             return self._json({'error': '接口不存在'}, 404)
         except ValueError as e:
             return self._json({'error': str(e)}, 400)
@@ -185,6 +335,11 @@ class H(SimpleHTTPRequestHandler):
     def do_POST(self):
         if self.path.startswith('/api/'):
             return self._api('POST')
+        self.send_error(405)
+
+    def do_PUT(self):
+        if self.path.startswith('/api/'):
+            return self._api('PUT')
         self.send_error(405)
 
     def do_DELETE(self):
@@ -199,6 +354,15 @@ class H(SimpleHTTPRequestHandler):
 
     def do_HEAD(self):
         return super().do_HEAD()
+
+    def translate_path(self, path):
+        p = urlparse(path).path
+        if p.startswith('/music-files/'):  # /music-files/<id>.<ext> -> data/music/<id>.<ext>
+            fn = os.path.basename(unquote(p))
+            if re.fullmatch(r'\d+\.(' + '|'.join(MUSIC_EXT) + ')', fn):
+                return os.path.join(MUSIC_DIR, fn)
+            return os.path.join(ROOT, '__missing__')
+        return super().translate_path(path)
 
     # ---- 静态文件(白名单 + Range) ----
     def _allowed(self):
@@ -250,6 +414,7 @@ class H(SimpleHTTPRequestHandler):
             pass  # 浏览器拖动/中断媒体时会断开连接,属正常
 
     def end_headers(self):
+        self.send_header('X-Content-Type-Options', 'nosniff')
         self.send_header('Accept-Ranges', 'bytes')
         super().end_headers()
 

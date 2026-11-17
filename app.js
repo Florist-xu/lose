@@ -2,13 +2,14 @@ import { FilesetResolver, PoseLandmarker } from './lib/package/vision_bundle.mjs
 
 const $ = id => document.getElementById(id);
 const GROUP_CN = ['第一组', '第二组', '第三组', '第四组', '第五组'];
-const cam = $('cam'), overlay = $('overlay'), ctx = overlay.getContext('2d'), ref = $('ref'), bgm = $('bgm');
+const cam = $('cam'), overlay = $('overlay'), ctx = overlay.getContext('2d'), ref = $('ref'), bgm = $('bgm'), restAudio = $('restAudio');
+const GROUP_REST = 120; // 每组结束后的中场休息(秒)
 // 示范画面(视频,可选/静音)与独立音频(bgm)一起按当前动作的片段同步;视频缺失也不影响声音
 ref.muted = true;
 let refOk = true;
 ref.addEventListener('error', () => { refOk = false; ref.closest('.card').style.display = 'none'; });
 const mSeek = t => { try { bgm.currentTime = t; } catch {} if (refOk) try { ref.currentTime = t; } catch {} };
-const mPause = () => { bgm.pause(); if (refOk) ref.pause(); };
+const mPause = () => { bgm.pause(); restAudio.pause(); if (refOk) ref.pause(); };
 const mPlay = () => {
   bgm.muted = !$('sound').checked;
   bgm.play().catch(() => {
@@ -34,6 +35,7 @@ let bgmReady = false;
     console.warn('音频 fetch 失败,改用直连', e); bgm.src = 'media/workout.m4a'; bgm.load(); bgmReady = true; bgmState('(直连)');
   }
   bgm.addEventListener('error', () => bgmState('(加载失败)'));
+  try { await loadTracks(); } catch (e) { console.warn('休息音乐列表加载失败', e); }
   btn.disabled = false; btn.textContent = label;
 })();
 
@@ -70,7 +72,7 @@ const S = {
   rep: 0, flags: { L: false, R: false }, sideCnt: { L: 0, R: 0 },
   restLeft: 0, moveTime: 0, totalTime: 0, paused: false,
   doneSet: new Set(), moveTimes: [], moveReps: [],
-  startedAt: null, active: 0, imgs: {}, plan: {}, saved: false,
+  groupBreak: false, startedAt: null, active: 0, imgs: {}, plan: {}, saved: false,
   lifts: { L: mkLift(), R: mkLift() },
 };
 function mkLift() { return { lifting: false, minK: 9, feat: null }; }
@@ -134,14 +136,21 @@ function renderHud() {
 
 // ---------- 流程 ----------
 function resetCount() { S.rep = 0; S.flags = { L: false, R: false }; S.sideCnt = { L: 0, R: 0 }; S.moveTime = 0; S.lifts = { L: mkLift(), R: mkLift() }; }
-function startRest(sec = DATA.restSec) {
-  resetCount(); S.phase = 'rest'; S.restLeft = sec; mPause();
+function startRest(sec = DATA.restSec, groupBreak = false) {
+  resetCount(); S.phase = 'rest'; S.restLeft = sec; S.groupBreak = groupBreak; mPause();
   mSeek(seg().start + 1); renderChips(); renderHud();
-  showBig(`${GROUP_CN[S.g]} · ${tpl().name}`, Math.ceil(S.restLeft), '准备,站到画面中');
-  setMsg('休息 / 准备中…');
+  $('bigCd').classList.toggle('small', groupBreak);
+  if (groupBreak) {
+    showBig(`${GROUP_CN[S.g - 1]}完成 🎉 中场休息`, fmt(Math.ceil(S.restLeft)), `下一组:${GROUP_CN[S.g]} · ${tpl().name}`);
+    $('bigBtns').style.display = 'flex'; setMsg('中场休息中…'); playRestMusic();
+  } else {
+    $('bigBtns').style.display = 'none';
+    showBig(`${GROUP_CN[S.g]} · ${tpl().name}`, Math.ceil(S.restLeft), '准备,站到画面中');
+    setMsg('休息 / 准备中…');
+  }
 }
 function startActive() {
-  S.phase = 'active'; hideBig(); beep(1200, 0.25); renderChips();
+  S.phase = 'active'; S.groupBreak = false; restAudio.pause(); $('bigBtns').style.display = 'none'; hideBig(); beep(1200, 0.25); renderChips();
   S.startedAt ??= new Date();
   S.plan[S.g] ??= { m: Math.floor(Math.random() * 4), at: 4 + Math.random() * 14 }; // 每组随机抓拍:随机动作 + 随机时刻
   setMsg('开始!左右腿各抬一次算 1 次', '');
@@ -153,7 +162,7 @@ function completeMove() {
   const p = S.plan[S.g]; if (S.imgs[S.g] === undefined && S.phase === 'active' && (S.m === 3 || (p && p.m === S.m))) capture(S.g); // 兜底:保证每组有图
   if (idx() >= 19) return finish();
   const nm = idx() + 1; S.g = Math.floor(nm / 4); S.m = nm % 4;
-  startRest();
+  startRest(nm % 4 === 0 ? GROUP_REST : DATA.restSec, nm % 4 === 0); // 每组结束后中场休息 2 分钟
 }
 function finish() { setMsg('全部完成!', 'ok'); endWorkout(); }
 
@@ -317,7 +326,7 @@ function loop(now) {
     if (S.phase === 'rest') {
       const prev = Math.ceil(S.restLeft); S.restLeft -= dt;
       if (Math.ceil(S.restLeft) !== prev && S.restLeft > 0 && S.restLeft <= 3) beep(660, 0.1);
-      $('bigCd').textContent = Math.max(0, Math.ceil(S.restLeft));
+      $('bigCd').textContent = S.groupBreak ? fmt(Math.max(0, Math.ceil(S.restLeft))) : Math.max(0, Math.ceil(S.restLeft));
       if (S.restLeft <= 0) startActive();
     } else {
       S.moveTime += dt; S.active += dt;
@@ -338,7 +347,7 @@ $('btnHistory').onclick = openHistory;
 $('btnSkip').onclick = () => { if (S.phase === 'active' || S.phase === 'rest') completeMove(); };
 $('btnPause').onclick = () => {
   S.paused = !S.paused; $('btnPause').textContent = S.paused ? '继续' : '暂停'; syncFS();
-  if (S.paused) mPause(); else if (S.phase === 'active') mPlay();
+  if (S.paused) mPause(); else if (S.phase === 'active') mPlay(); else if (S.phase === 'rest' && S.groupBreak) playRestMusic();
   setMsg(S.paused ? '已暂停' : '继续');
 };
 addEventListener('keydown', e => { if (e.key === 'n') $('btnSkip').click(); if (e.key === ' ') { e.preventDefault(); $('btnPause').click(); } });
@@ -347,6 +356,7 @@ $('btnStart').onclick = async () => {
   enterFS();
   try { actx ??= new AudioContext(); actx.resume(); } catch {}
   bgm.muted = true; { const up = bgm.play(); if (up) up.then(() => { bgm.pause(); bgm.muted = !$('sound').checked; }).catch(() => {}); } // 解锁音乐(iOS)
+  restAudio.muted = true; if (restAudio.getAttribute('src')) { const ru = restAudio.play(); if (ru) ru.then(() => { restAudio.pause(); restAudio.currentTime = 0; }).catch(() => {}); } // 解锁休息音乐(iOS)
   $('btnStart').disabled = true; setMsg('正在加载模型与摄像头…');
   try {
     try { actx ??= new AudioContext(); await actx.resume(); beep(1, 0.01, 0.001); } catch {} // 在点击手势内解锁提示音(iOS)
@@ -362,5 +372,96 @@ $('btnStart').onclick = async () => {
     S.g = 0; S.m = 0; startRest();
   } catch (err) { exitFS(); setMsg('启动失败:' + err.message + '(请用 http://localhost:8080 打开并允许摄像头)', 'bad'); $('btnStart').disabled = false; console.error(err); }
 };
+
+// ---------- 休息音乐(用户上传 / 导入) ----------
+let tracks = [], lastTrackId = null;
+const blobCache = new Map();
+const MIME = { mp3: 'audio/mpeg', m4a: 'audio/mp4', aac: 'audio/aac', wav: 'audio/wav', ogg: 'audio/ogg', flac: 'audio/flac', mp4: 'video/mp4' };
+const chosen = () => { try { return localStorage.getItem('restMusic') || 'all'; } catch { return 'all'; } };
+const mb = n => (n / 1048576).toFixed(1) + 'MB';
+async function trackURL(t) { // 用 fetch 下载成 blob 再播放(兼容 iPhone 自签名 HTTPS)
+  if (!blobCache.has(t.id)) {
+    const r = await fetch(t.url); if (!r.ok) throw new Error('HTTP ' + r.status);
+    blobCache.set(t.id, URL.createObjectURL(new Blob([await r.arrayBuffer()], { type: MIME[t.ext] || 'audio/mpeg' })));
+  }
+  return blobCache.get(t.id);
+}
+function pickTrack(forceAll) {
+  if (!tracks.length) return null;
+  const c = chosen();
+  if (!forceAll && c !== 'all') { const t = tracks.find(x => String(x.id) === c); if (t) return t; }
+  const pool = tracks.length > 1 ? tracks.filter(x => x.id !== lastTrackId) : tracks;
+  return pool[Math.floor(Math.random() * pool.length)];
+}
+async function prepareRest(forceAll = false) {
+  const t = pickTrack(forceAll);
+  if (!t) { restAudio.removeAttribute('src'); restAudio.load(); return; }
+  try { restAudio.src = await trackURL(t); lastTrackId = t.id; restAudio.loop = !forceAll && chosen() !== 'all'; } catch (e) { console.warn('休息音乐加载失败', e); }
+}
+async function loadTracks() {
+  const r = await fetch('api/music'); const j = await r.json();
+  tracks = Array.isArray(j) ? j : [];
+  await prepareRest();
+}
+function playRestMusic() {
+  if (!tracks.length) { $('bigS').textContent += '(还没有休息音乐,训练结束后可在页头「休息音乐」里添加)'; return; }
+  restAudio.muted = false;
+  restAudio.play().catch(() => setMsg('休息音乐被浏览器拦截,点一下"音乐"按钮开启', 'bad'));
+}
+restAudio.addEventListener('ended', async () => { await prepareRest(); if (S.phase === 'rest' && S.groupBreak && !S.paused) playRestMusic(); });
+$('bSkipRest').onclick = () => { if (S.phase === 'rest') S.restLeft = 0; };
+$('bPauseMusic').onclick = () => { if (restAudio.paused) playRestMusic(); else restAudio.pause(); $('bPauseMusic').textContent = restAudio.paused ? '▶ 音乐' : '⏸ 音乐'; };
+$('bNextTrack').onclick = async () => { await prepareRest(true); playRestMusic(); $('bPauseMusic').textContent = '⏸ 音乐'; };
+
+async function openMusic() {
+  try { await loadTracks(); } catch {}
+  const c = chosen();
+  const rows = tracks.map(t => `<div class="dayrow" style="cursor:default"><label style="flex:1;gap:8px;color:var(--fg)"><input type="radio" name="rm" value="${t.id}" ${String(t.id) === c ? 'checked' : ''}>${esc(t.title)} <span style="color:var(--mut)">${mb(t.size)}</span></label>
+    <span><button data-prev="${t.id}">试听</button> <button class="danger" data-del="${t.id}">删除</button></span></div>`).join('');
+  openModal(`<h2>休息音乐</h2><div class="sub">每组结束后会中场休息 2 分钟,期间播放这里选中的音乐。</div>
+    <div class="btns" style="margin-top:6px"><button id="mUpload" class="pri">上传音频/视频文件</button></div>
+    <input id="mFile" type="file" accept=".mp3,.m4a,.aac,.wav,.ogg,.flac,.mp4,audio/*,video/mp4" style="display:none">
+    <div style="display:flex;gap:8px;margin-top:10px"><input id="mLink" placeholder="粘贴音频直链(以 http 开头的 mp3/m4a 文件地址)" style="flex:1;min-width:0;padding:9px;border-radius:8px;border:1px solid var(--line);background:#0003;color:var(--fg)"><button id="mImport">导入</button></div>
+    <div class="note" style="color:var(--mut)">抖音等平台的分享链接有反爬保护,无法自动解析。可在抖音里「保存视频」,再点上方上传该文件(mp4 也行,只播放声音)。</div>
+    <div id="note" class="note"></div>
+    <div style="margin:12px 0 6px;font-size:13px;color:var(--mut)">播放方式</div>
+    <div class="dayrow" style="cursor:default"><label style="flex:1;gap:8px;color:var(--fg)"><input type="radio" name="rm" value="all" ${c === 'all' ? 'checked' : ''}>全部随机播放</label></div>
+    ${rows || '<div class="sub">还没有音乐,先上传一个吧</div>'}
+    <div class="btns"><button id="bClose">完成</button></div>`, true);
+  $('bClose').onclick = () => { restAudio.pause(); closeModal(); prepareRest(); };
+  mbox.querySelectorAll('input[name=rm]').forEach(r => r.onchange = () => { try { localStorage.setItem('restMusic', r.value); } catch {} });
+  $('mUpload').onclick = () => $('mFile').click();
+  $('mFile').onchange = async e => {
+    const f = e.target.files[0]; if (!f) return;
+    setNote(`上传中…(${mb(f.size)})`);
+    try {
+      const r = await fetch('api/music?name=' + encodeURIComponent(f.name), { method: 'PUT', headers: { 'Content-Type': f.type || 'application/octet-stream' }, body: f });
+      const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status));
+      openMusic();
+    } catch (err) { setNote('上传失败:' + err.message, 'bad'); }
+  };
+  $('mImport').onclick = async () => {
+    const url = $('mLink').value.trim(); if (!url) return setNote('请先粘贴链接', 'bad');
+    setNote('正在下载…'); $('mImport').disabled = true;
+    try {
+      const r = await fetch('api/music/link', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url }) });
+      const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status));
+      openMusic();
+    } catch (err) { setNote(err.message, 'bad'); $('mImport').disabled = false; }
+  };
+  mbox.querySelectorAll('[data-prev]').forEach(b => b.onclick = async () => {
+    const t = tracks.find(x => String(x.id) === b.dataset.prev); if (!t) return;
+    if (!restAudio.paused && restAudio.dataset.prev === b.dataset.prev) { restAudio.pause(); b.textContent = '试听'; return; }
+    try { restAudio.src = await trackURL(t); restAudio.loop = false; restAudio.dataset.prev = b.dataset.prev; restAudio.muted = false; await restAudio.play(); b.textContent = '停止'; } catch (err) { setNote('无法播放:' + err.message, 'bad'); }
+  });
+  mbox.querySelectorAll('[data-del]').forEach(b => b.onclick = async () => {
+    if (!confirm('确定删除这首音乐吗?')) return;
+    restAudio.pause(); await fetch('api/music/' + b.dataset.del, { method: 'DELETE' });
+    const old = blobCache.get(+b.dataset.del); if (old) { URL.revokeObjectURL(old); blobCache.delete(+b.dataset.del); }
+    if (chosen() === b.dataset.del) { try { localStorage.setItem('restMusic', 'all'); } catch {} }
+    openMusic();
+  });
+}
+$('btnMusic').onclick = openMusic;
 fetch('templates.json').then(r => r.json()).then(d => { DATA = d; renderChips(); renderHud(); });
 requestAnimationFrame(loop);
