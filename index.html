@@ -70,7 +70,8 @@ body:not(.hideRef) .stage.full .msg{left:calc(122px + env(safe-area-inset-left))
 </head>
 <body>
 <header>
-  <h1>🏋️ 跟练打卡 · 5组 × 4动作 × 20次</h1>
+  <h1 id="title">🏋️ 跟练打卡</h1>
+  <label>项目<select id="wsel"></select></label>
   <label><input type="checkbox" id="mirror" checked>镜像</label>
   <label><input type="checkbox" id="sound" checked>音乐 <span id="bgmState"></span></label>
   <label>识别<select id="sens"><option value="1.4">严格</option><option value="1.8" selected>标准</option><option value="2.6">宽松</option></select></label>
@@ -89,7 +90,7 @@ body:not(.hideRef) .stage.full .msg{left:calc(122px + env(safe-area-inset-left))
       <canvas id="overlay" class="mirror"></canvas>
       <div class="hud"><div><div class="t" id="hGroup">第一组</div><div class="n" id="hMove">胯下击掌</div></div>
         <div style="text-align:right"><div class="t">本动作用时</div><div class="n" id="hTimer">00:00</div></div></div>
-      <div class="count"><span id="cnt">0</span><small>/20</small></div>
+      <div class="count"><span id="cnt">0</span><small id="cntMax">/20</small></div>
       <div class="msg" id="msg">点击右上角"开启摄像头并开始"</div>
       <div class="fsbar"><button id="fsRef">隐藏示范</button><button id="fsPause">暂停</button><button id="fsSkip">跳过</button><button id="fsEnd">结束</button><button id="fsExit">退出全屏</button></div>
       <div class="big" id="big"><div class="h" id="bigH"></div><div class="cd" id="bigCd"></div><div class="s" id="bigS"></div>
@@ -98,16 +99,16 @@ body:not(.hideRef) .stage.full .msg{left:calc(122px + env(safe-area-inset-left))
     <div class="card dbg" id="dbgBox" style="margin-top:12px;display:none"></div>
   </section>
   <aside>
-    <div class="card" id="refCard"><h3>示范画面(声音由独立音频播放)</h3><div class="ref"><video id="ref" src="media/workout.mp4" playsinline preload="auto"></video></div></div>
+    <div class="card" id="refCard"><h3>示范画面(声音由独立音频播放)</h3><div class="ref"><video id="ref" playsinline preload="auto"></video></div></div>
     <div class="card"><h3>进度</h3>
-      <div class="stats"><div><b id="sTotal">00:00</b><span>总用时</span></div><div><b id="sDone">0/20</b><span>已完成动作</span></div>
+      <div class="stats"><div><b id="sTotal">00:00</b><span>总用时</span></div><div><b id="sDone">0/0</b><span>已完成动作</span></div>
       <div><b id="sL">0</b><span>左腿有效次数</span></div><div><b id="sR">0</b><span>右腿有效次数</span></div></div></div>
     <div class="card"><h3>点击可跳转到任意动作</h3><div class="chips" id="chips"></div></div>
   </aside>
 </main>
 <div class="modal" id="modal"><div class="mbox" id="mbox"></div></div>
 <audio id="restAudio" preload="auto" playsinline></audio>
-<audio id="bgm" src="media/workout.m4a" preload="auto"></audio>
+<audio id="bgm" preload="auto"></audio>
 <script type="module" src="app.js"></script>
 </body>
 </html>

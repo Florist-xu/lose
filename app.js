@@ -1,9 +1,9 @@
 import { FilesetResolver, PoseLandmarker } from './lib/package/vision_bundle.mjs';
 
 const $ = id => document.getElementById(id);
-const GROUP_CN = ['第一组', '第二组', '第三组', '第四组', '第五组'];
+const CNUM = '一二三四五六七八九十';
+const gname = g => g < 10 ? `第${CNUM[g]}组` : `第${g + 1}组`;
 const cam = $('cam'), overlay = $('overlay'), ctx = overlay.getContext('2d'), ref = $('ref'), bgm = $('bgm'), restAudio = $('restAudio');
-const GROUP_REST = 120; // 每组结束后的中场休息(秒)
 // 示范画面(视频,可选/静音)与独立音频(bgm)一起按当前动作的片段同步;视频缺失也不影响声音
 ref.muted = true;
 let refOk = true;
@@ -22,24 +22,43 @@ const mPlay = () => {
 // 音乐文件改用 fetch 下载成 blob 再播放:iPhone/Safari 对"自签名 HTTPS"页面,
 // <audio src> 直连会加载失败,而 fetch 会沿用页面已信任的证书。加载状态显示在页头。
 const bgmState = t => { const e = $('bgmState'); if (e) e.textContent = t; };
-let bgmReady = false;
-(async () => {
+let bgmReady = false, DATA, WID, landmarker = null;
+const NG = () => DATA.groups, NM = () => DATA.movesPerGroup, NMOV = () => DATA.groups * DATA.movesPerGroup;
+
+// ---------- 运动项目:workouts/<id>/workout.json + 同目录的音频/示范视频 ----------
+// 换项目 = 刷新页面并带上 ?w=<id>(训练中不允许切换)
+async function init() {
   const btn = $('btnStart'), label = btn.textContent;
-  btn.disabled = true; btn.textContent = '音乐加载中…'; bgmState('(加载中…)');
+  btn.disabled = true; btn.textContent = '加载中…'; bgmState('(加载中…)');
+  let list = [];
+  try { list = await (await fetch('api/workouts')).json(); } catch {}
+  if (!list.length) { setMsg('没有找到运动项目(workouts 目录)', 'bad'); btn.textContent = label; return; }
+  let saved = null; try { saved = localStorage.getItem('workout'); } catch {}
+  WID = [new URLSearchParams(location.search).get('w'), saved].find(x => x && list.some(w => w.id === x)) || list[0].id;
+  const sel = $('wsel'); sel.innerHTML = list.map(w => `<option value="${w.id}">${esc(w.name)}</option>`).join(''); sel.value = WID;
+  sel.onchange = () => { try { localStorage.setItem('workout', sel.value); } catch {} location.href = location.pathname + '?w=' + encodeURIComponent(sel.value); };
+  const base = `workouts/${WID}/`;
+  DATA = await (await fetch(base + 'workout.json')).json();
+  DATA.groups ??= 1; DATA.movesPerGroup ??= DATA.templates.length; DATA.groupRestSec ??= 120; DATA.restSec ??= 10;
+  document.title = `${DATA.name} · 跟练打卡`;
+  $('title').textContent = `🏋️ ${DATA.name} · ${NG()}组 × ${NM()}动作 × ${DATA.reps}次`;
+  $('cntMax').textContent = '/' + DATA.reps; $('sDone').textContent = `0/${NMOV()}`;
+  if (DATA.counter && DATA.counter !== 'kneeLift') { setMsg(`「${DATA.name}」需要的识别方式(${DATA.counter})暂未支持`, 'bad'); btn.textContent = label; return; }
+  ref.src = base + (DATA.video || 'workout.mp4');
+  const au = base + (DATA.audio || 'workout.m4a');
+  renderChips(); renderHud();
+  // 音乐文件用 fetch 成 blob 再播放(iPhone 自签名 HTTPS 下 <audio src> 直连会失败)
   try {
-    const r = await fetch('media/workout.m4a'); if (!r.ok) throw new Error('HTTP ' + r.status);
-    const blob = new Blob([await r.arrayBuffer()], { type: 'audio/mp4' });
-    bgm.src = URL.createObjectURL(blob); bgm.load();
+    const r = await fetch(au); if (!r.ok) throw new Error('HTTP ' + r.status);
+    bgm.src = URL.createObjectURL(new Blob([await r.arrayBuffer()], { type: 'audio/mp4' })); bgm.load();
     bgmReady = true; bgmState('(已就绪)');
   } catch (e) {
-    console.warn('音频 fetch 失败,改用直连', e); bgm.src = 'media/workout.m4a'; bgm.load(); bgmReady = true; bgmState('(直连)');
+    console.warn('音频 fetch 失败,改用直连', e); bgm.src = au; bgm.load(); bgmReady = true; bgmState('(直连)');
   }
   bgm.addEventListener('error', () => bgmState('(加载失败)'));
   try { await loadTracks(); } catch (e) { console.warn('休息音乐列表加载失败', e); }
   btn.disabled = false; btn.textContent = label;
-})();
-
-let DATA, landmarker = null;
+}
 
 // ---------- 全屏(开始训练时铺满屏幕,结束后自动退出) ----------
 // 桌面/安卓用原生全屏;iPhone 的 Safari 不支持元素全屏,自动退化为"页面内铺满"。两种方式都带画面内按钮条。
@@ -81,7 +100,7 @@ const S = {
   lifts: { L: mkLift(), R: mkLift() },
 };
 function mkLift() { return { lifting: false, minK: 9, feat: null, best: null }; }
-const idx = () => S.g * 4 + S.m;
+const idx = () => S.g * NM() + S.m;
 const seg = () => DATA.segments[idx()];
 const tpl = () => DATA.templates[S.m];
 
@@ -119,10 +138,11 @@ function showBig(h, cd, s) { $('bigH').textContent = h; $('bigCd').textContent =
 const hideBig = () => $('big').classList.remove('show');
 function renderChips() {
   let h = '';
-  for (let g = 0; g < 5; g++) {
-    h += `<div>${GROUP_CN[g].slice(1)}</div>`;
-    for (let m = 0; m < 4; m++) {
-      const i = g * 4 + m, cls = (i === idx() && S.phase !== 'done' && S.phase !== 'idle' ? 'cur ' : '') + (S.doneSet.has(i) ? 'done' : '');
+  $('chips').style.gridTemplateColumns = `auto repeat(${NM()},1fr)`;
+  for (let g = 0; g < NG(); g++) {
+    h += `<div>${gname(g).slice(1)}</div>`;
+    for (let m = 0; m < NM(); m++) {
+      const i = g * NM() + m, cls = (i === idx() && S.phase !== 'done' && S.phase !== 'idle' ? 'cur ' : '') + (S.doneSet.has(i) ? 'done' : '');
       h += `<div class="chip ${cls}" data-i="${i}" title="${DATA.templates[m].name}">${DATA.templates[m].name.slice(0, 2)}</div>`;
     }
   }
@@ -131,12 +151,12 @@ function renderChips() {
 $('chips').addEventListener('click', e => {
   const i = e.target.dataset?.i; if (i == null || !landmarker) return;
   if (S.phase === 'active' && S.moveTime > 2 && S.imgs[S.g] === undefined) capture(S.g); // 离开当前组前兜底抓拍
-  S.g = Math.floor(i / 4); S.m = i % 4; startRest(3);
+  S.g = Math.floor(i / NM()); S.m = i % NM(); startRest(3);
 });
 function renderHud() {
-  $('hGroup').textContent = GROUP_CN[S.g]; $('hMove').textContent = tpl().name;
+  $('hGroup').textContent = gname(S.g); $('hMove').textContent = tpl().name;
   $('cnt').textContent = S.rep; $('hTimer').textContent = fmt(S.moveTime); $('sTotal').textContent = fmt(S.totalTime);
-  $('sDone').textContent = S.doneSet.size + '/20'; $('sL').textContent = S.sideCnt.L; $('sR').textContent = S.sideCnt.R;
+  $('sDone').textContent = S.doneSet.size + '/' + NMOV(); $('sL').textContent = S.sideCnt.L; $('sR').textContent = S.sideCnt.R;
 }
 
 // ---------- 流程 ----------
@@ -146,28 +166,28 @@ function startRest(sec = DATA.restSec, groupBreak = false) {
   mSeek(seg().start + 1); renderChips(); renderHud();
   $('bigCd').classList.toggle('small', groupBreak);
   if (groupBreak) {
-    showBig(`${GROUP_CN[S.g - 1]}完成 🎉 中场休息`, fmt(Math.ceil(S.restLeft)), `下一组:${GROUP_CN[S.g]} · ${tpl().name}`);
+    showBig(`${gname(S.g - 1)}完成 🎉 中场休息`, fmt(Math.ceil(S.restLeft)), `下一组:${gname(S.g)} · ${tpl().name}`);
     $('bigBtns').style.display = 'flex'; $('bPauseMusic').textContent = '⏸ 音乐'; setMsg('中场休息中…'); playRestMusic();
   } else {
     $('bigBtns').style.display = 'none';
-    showBig(`${GROUP_CN[S.g]} · ${tpl().name}`, Math.ceil(S.restLeft), '准备,站到画面中');
+    showBig(`${gname(S.g)} · ${tpl().name}`, Math.ceil(S.restLeft), '准备,站到画面中');
     setMsg('休息 / 准备中…');
   }
 }
 function startActive() {
   S.phase = 'active'; S.groupBreak = false; restAudio.pause(); $('bigBtns').style.display = 'none'; hideBig(); beep(1200, 0.25); renderChips();
   S.startedAt ??= new Date();
-  S.plan[S.g] ??= { m: Math.floor(Math.random() * 4), at: 4 + Math.random() * 14 }; // 每组随机抓拍:随机动作 + 随机时刻
+  S.plan[S.g] ??= { m: Math.floor(Math.random() * NM()), at: 4 + Math.random() * 14 }; // 每组随机抓拍:随机动作 + 随机时刻
   setMsg('开始!左右腿各抬一次算 1 次', '');
   mSeek(seg().start + 1); mPlay();
 }
 function completeMove() {
   S.doneSet.add(idx()); S.moveTimes[idx()] = S.moveTime; S.moveReps[idx()] = S.rep; beep(1500, 0.4, 0.2);
   mPause();
-  const p = S.plan[S.g]; if (S.imgs[S.g] === undefined && S.phase === 'active' && (S.m === 3 || (p && p.m === S.m))) capture(S.g); // 兜底:保证每组有图
-  if (idx() >= 19) return finish();
-  const nm = idx() + 1; S.g = Math.floor(nm / 4); S.m = nm % 4;
-  startRest(nm % 4 === 0 ? GROUP_REST : DATA.restSec, nm % 4 === 0); // 每组结束后中场休息 2 分钟
+  const p = S.plan[S.g]; if (S.imgs[S.g] === undefined && S.phase === 'active' && (S.m === NM() - 1 || (p && p.m === S.m))) capture(S.g); // 兜底:保证每组有图
+  if (idx() >= NMOV() - 1) return finish();
+  const nm = idx() + 1; S.g = Math.floor(nm / NM()); S.m = nm % NM();
+  startRest(nm % NM() === 0 ? DATA.groupRestSec : DATA.restSec, nm % NM() === 0); // 每组结束后中场休息 2 分钟
 }
 function finish() { setMsg('全部完成!', 'ok'); endWorkout(); }
 
@@ -198,7 +218,7 @@ function buildPayload() {
   S.moveTimes.forEach((sec, i) => { if (sec !== undefined) moves.push({ idx: i, reps: S.moveReps[i] ?? 0, sec: Math.round(sec) }); });
   const images = Object.entries(S.imgs).map(([g, v]) => ({ group: +g, move_idx: v.move_idx, data: v.data }));
   const t0 = S.startedAt ?? new Date();
-  return { day: dayOf(t0), started_at: t0.toISOString(), duration_sec: Math.round(S.totalTime), active_sec: Math.round(S.active), moves_done: S.doneSet.size, moves, images };
+  return { workout: WID, workout_name: DATA.name, day: dayOf(t0), started_at: t0.toISOString(), duration_sec: Math.round(S.totalTime), active_sec: Math.round(S.active), moves_done: S.doneSet.size, moves, images };
 }
 function endWorkout() {
   if (S.phase === 'idle') return;
@@ -206,7 +226,7 @@ function endWorkout() {
     if (S.moveTime > 1 && S.moveTimes[idx()] === undefined) { S.moveTimes[idx()] = S.moveTime; S.moveReps[idx()] = S.rep; }
     if (S.imgs[S.g] === undefined) capture(S.g);
   }
-  S.phase = 'done'; mPause(); hideBig(); renderChips(); exitFS(); stage.classList.remove('live');
+  S.phase = 'done'; mPause(); hideBig(); renderChips(); exitFS(); stage.classList.remove('live'); $('wsel').disabled = false;
   $('btnEnd').disabled = $('btnPause').disabled = $('btnSkip').disabled = true;
   showSavePrompt();
 }
@@ -217,10 +237,10 @@ function showSavePrompt() {
     $('bAgain').onclick = () => location.reload();
     return;
   }
-  const thumbs = [0, 1, 2, 3, 4].map(g => `<figure>${S.imgs[g] ? `<img src="${S.imgs[g].data}" alt="">` : '<img alt="">'}第${g + 1}组</figure>`).join('');
+  const thumbs = Array.from({ length: NG() }, (_, g) => `<figure>${S.imgs[g] ? `<img src="${S.imgs[g].data}" alt="">` : '<img alt="">'}第${g + 1}组</figure>`).join('');
   openModal(`<h2>🎉 训练结束</h2><div class="sub">${esc(p.day)} · 是否保存今天的锻炼记录?</div>
     <div class="kv"><div><b>${fmtDur(p.duration_sec)}</b><span>总用时(含休息)</span></div><div><b>${fmtDur(p.active_sec)}</b><span>动作用时</span></div>
-    <div><b>${p.moves_done}/20</b><span>完成动作</span></div><div><b>${p.images.length}/5</b><span>每组随机抓拍</span></div></div>
+    <div><b>${p.moves_done}/${NMOV()}</b><span>完成动作</span></div><div><b>${p.images.length}/${NG()}</b><span>每组随机抓拍</span></div></div>
     <div class="thumbs">${thumbs}</div>
     <div class="btns"><button id="bSave" class="pri">保存记录</button><button id="bDiscard" class="danger">放弃保存</button></div><div id="note" class="note"></div>`);
   $('bSave').onclick = () => doSave(p);
@@ -263,7 +283,7 @@ async function openHistory() {
 async function openDay(day) {
   try {
     const list = await (await fetch('api/sessions?day=' + encodeURIComponent(day))).json();
-    const html = list.map(s => `<div class="sess"><b>${esc(new Date(s.started_at).toLocaleTimeString())}</b> · 总用时 ${fmtDur(s.duration_sec)} · 动作用时 ${fmtDur(s.active_sec)} · 完成 ${s.moves_done}/20
+    const html = list.map(s => `<div class="sess"><b>${esc(new Date(s.started_at).toLocaleTimeString())}</b> · 总用时 ${fmtDur(s.duration_sec)} · 动作用时 ${fmtDur(s.active_sec)} · ${esc(s.workout_name || '')} · 完成 ${s.moves_done} 个动作
       <div class="thumbs">${s.images.map(i => `<figure><img loading="lazy" src="api/images/${i.id}" alt="">第${i.grp + 1}组</figure>`).join('')}</div>
       <button data-del="${s.id}" class="danger">删除这条</button></div>`).join('');
     openModal(`<h2>${esc(day)}</h2>${html || '<div class="sub">当天没有记录</div>'}<div class="btns"><button id="bBack">返回</button><button id="bClose">关闭</button></div>`, true);
@@ -292,7 +312,7 @@ function onLift(side) {
   } else {
     const all = DATA.templates.map((t, i) => [score(t, l.feat), i]).sort((a, b) => a[0] - b[0]);
     const f = l.feat; let hint = `「${tpl().name}」手部/抬腿不标准,请对照右侧示范`;
-    if (S.m === 1) hint = f[7] > -0.12 ? '提膝下压:膝盖再抬高一点(至少到腰部)' : Math.max(f[0], f[1]) > 0.75 ? '提膝下压:双手要按到抬起的膝盖上' : hint;
+    if (DATA.id === 'fatburn' && S.m === 1) hint = f[7] > -0.12 ? '提膝下压:膝盖再抬高一点(至少到腰部)' : Math.max(f[0], f[1]) > 0.75 ? '提膝下压:双手要按到抬起的膝盖上' : hint;
     setMsg(all[0][0] < lim && all[0][1] !== S.m ? `这个更像「${DATA.templates[all[0][1]].name}」,请做「${tpl().name}」` : hint, 'bad');
   }
   if ($('debug').checked) $('dbgBox').textContent = `side=${side} score=${sc.toFixed(2)} lim=${lim}\nfeat=` + l.feat.map(v => v.toFixed(2)).join(' ') + '\n' + DATA.templates.map(t => t.name + ':' + score(t, l.feat).toFixed(2)).join('  ');
@@ -360,7 +380,7 @@ $('btnPause').onclick = () => {
 addEventListener('keydown', e => { if (e.key === 'n') $('btnSkip').click(); if (e.key === ' ') { e.preventDefault(); $('btnPause').click(); } });
 
 $('btnStart').onclick = async () => {
-  enterFS();
+  enterFS(); $('wsel').disabled = true;
   try { actx ??= new AudioContext(); actx.resume(); } catch {}
   bgm.muted = true; { const up = bgm.play(); if (up) up.then(() => { bgm.pause(); bgm.muted = !$('sound').checked; }).catch(() => {}); } // 解锁音乐(iOS)
   restAudio.muted = true; if (restAudio.getAttribute('src')) { const ru = restAudio.play(); if (ru) ru.then(() => { restAudio.pause(); restAudio.currentTime = 0; }).catch(() => {}); } // 解锁休息音乐(iOS)
@@ -368,7 +388,6 @@ $('btnStart').onclick = async () => {
   try {
     try { actx ??= new AudioContext(); await actx.resume(); beep(1, 0.01, 0.001); } catch {} // 在点击手势内解锁提示音(iOS)
     if (!navigator.mediaDevices?.getUserMedia) throw new Error('当前地址不是安全连接,浏览器禁用了摄像头。请用 https://' + location.hostname + ':8443 打开(或在本机用 localhost)');
-    DATA = await (await fetch('templates.json')).json();
     const fileset = await FilesetResolver.forVisionTasks('./lib/package/wasm');
     const mk = delegate => PoseLandmarker.createFromOptions(fileset, { baseOptions: { modelAssetPath: './lib/pose_landmarker_full.task', delegate }, runningMode: 'VIDEO', numPoses: 1 });
     try { landmarker = await mk('GPU'); } catch { landmarker = await mk('CPU'); }
@@ -378,7 +397,7 @@ $('btnStart').onclick = async () => {
     $('btnPause').disabled = $('btnSkip').disabled = $('btnEnd').disabled = false;
     stage.classList.add('live'); syncFS();
     S.g = 0; S.m = 0; startRest();
-  } catch (err) { exitFS(); setMsg('启动失败:' + err.message + '(请用 http://localhost:8080 打开并允许摄像头)', 'bad'); $('btnStart').disabled = false; console.error(err); }
+  } catch (err) { exitFS(); $('wsel').disabled = false; setMsg('启动失败:' + err.message + '(请用 http://localhost:8080 打开并允许摄像头)', 'bad'); $('btnStart').disabled = false; console.error(err); }
 };
 
 // ---------- 休息音乐(用户上传 / 导入) ----------
@@ -471,5 +490,5 @@ async function openMusic() {
   });
 }
 $('btnMusic').onclick = openMusic;
-fetch('templates.json').then(r => r.json()).then(d => { DATA = d; renderChips(); renderHud(); });
+init();
 requestAnimationFrame(loop);

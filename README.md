@@ -66,13 +66,13 @@ sh start.sh
 > 注意:接口没有登录验证,仅适合在自己的手机/家庭局域网使用,不要暴露到公网。
 
 ## 文件
-- `templates.json`:20 个动作的时间段与识别模板(由参考视频提取)
-- `build_templates.py`:模板生成脚本(需要 `pose_raw.json`,未提交)
+- `workouts/<id>/`:每个运动项目一个文件夹(配置+模板+音频+示范视频),页头"项目"下拉框切换;新增方法见 [workouts/README.md](workouts/README.md)
+- `workouts/fatburn/workout.json`:当前项目的 20 个动作时间段与识别模板(由参考视频提取)
+- `build_templates.py`:fatburn 的模板生成脚本(需要 `pose_raw.json`,未提交)
 - `app.js` / `index.html`:前端识别、流程、保存与历史
 - `server.py`:服务器(静态文件白名单 + Range + SQLite 接口);`start.sh` / `start.bat` 启动脚本
 - `lib/`:本地 MediaPipe 库与姿态模型(离线可用)
-- `media/workout.m4a`:从原视频提取的音频,按当前动作的片段循环播放
-- `media/workout.mp4`:示范画面(可选,缺失也不影响声音)
+- `workouts/fatburn/workout.m4a`:从原视频提取的音频,按当前动作的片段循环播放;`workout.mp4` 是示范画面(可选)
 
 ## 常见问题
 - **`CANNOT LINK EXECUTABLE "node"`**:本项目已不使用 node,直接 `sh start.sh` 即可。

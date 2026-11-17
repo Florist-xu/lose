@@ -19,7 +19,7 @@ MAX_MUSIC = 60 * 1024 * 1024
 MUSIC_EXT = {'mp3', 'm4a', 'aac', 'wav', 'ogg', 'flac', 'mp4'}  # mp4 = 从抖音等保存的视频,只取声音
 CT_EXT = {'audio/mpeg': 'mp3', 'audio/mp3': 'mp3', 'audio/mp4': 'm4a', 'audio/x-m4a': 'm4a', 'audio/aac': 'aac', 'audio/wav': 'wav',
           'audio/x-wav': 'wav', 'audio/ogg': 'ogg', 'audio/flac': 'flac', 'video/mp4': 'mp4'}
-PUBLIC = {'index.html', 'app.js', 'templates.json', 'lib', 'media', 'favicon.ico', 'music-files'}  # 只公开这些,certs/data 等不会被下载
+PUBLIC = {'index.html', 'app.js', 'workouts', 'lib', 'favicon.ico', 'music-files'}  # 只公开这些,certs/data 等不会被下载
 mimetypes.add_type('application/wasm', '.wasm')
 mimetypes.add_type('text/javascript', '.mjs')
 mimetypes.add_type('video/mp4', '.mp4')
@@ -65,6 +65,10 @@ def init_db():
           title TEXT NOT NULL, ext TEXT NOT NULL, size INTEGER NOT NULL, source TEXT,
           created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')));
         ''')
+        cols = {r['name'] for r in c.execute('PRAGMA table_info(sessions)')}
+        if 'workout' not in cols:   # 多运动项目:旧记录都属于第一个项目 fatburn
+            c.execute("ALTER TABLE sessions ADD COLUMN workout TEXT NOT NULL DEFAULT 'fatburn'")
+            c.execute("ALTER TABLE sessions ADD COLUMN workout_name TEXT NOT NULL DEFAULT '燃脂跟练'")
 
 
 def clamp_int(v, lo, hi, name):
@@ -83,19 +87,23 @@ def save_session(body):
     started = str(body.get('started_at', ''))[:40]
     dur = clamp_int(body.get('duration_sec'), 0, 86400, 'duration_sec')
     act = clamp_int(body.get('active_sec'), 0, 86400, 'active_sec')
-    done = clamp_int(body.get('moves_done'), 0, 20, 'moves_done')
+    done = clamp_int(body.get('moves_done'), 0, 200, 'moves_done')
+    wid = str(body.get('workout', 'fatburn'))
+    if not WID_RE.match(wid):
+        raise ValueError('workout 不合法')
+    wname = str(body.get('workout_name', wid))[:40]
     moves = body.get('moves', [])
-    if not isinstance(moves, list) or len(moves) > 20:
+    if not isinstance(moves, list) or len(moves) > 200:
         raise ValueError('moves 不合法')
     clean_moves = []
     for m in moves:
-        clean_moves.append({'idx': clamp_int(m.get('idx'), 0, 19, 'idx'), 'reps': clamp_int(m.get('reps'), 0, 100, 'reps'),
+        clean_moves.append({'idx': clamp_int(m.get('idx'), 0, 199, 'idx'), 'reps': clamp_int(m.get('reps'), 0, 100, 'reps'),
                             'sec': clamp_int(m.get('sec'), 0, 86400, 'sec')})
     imgs = []
-    for im in body.get('images', [])[:10]:
-        g = clamp_int(im.get('group'), 0, 4, 'group')
+    for im in body.get('images', [])[:50]:
+        g = clamp_int(im.get('group'), 0, 49, 'group')
         mi = im.get('move_idx')
-        mi = clamp_int(mi, 0, 19, 'move_idx') if mi is not None else None
+        mi = clamp_int(mi, 0, 199, 'move_idx') if mi is not None else None
         data = str(im.get('data', ''))
         if not data.startswith('data:image/jpeg;base64,'):
             raise ValueError('图片必须是 JPEG')
@@ -107,12 +115,33 @@ def save_session(body):
             raise ValueError('图片无效或过大')
         imgs.append((g, mi, raw))
     with db() as c:
-        cur = c.execute('INSERT INTO sessions(day,started_at,duration_sec,active_sec,moves_done,moves_json) VALUES(?,?,?,?,?,?)',
-                        (day, started, dur, act, done, json.dumps(clean_moves)))
+        cur = c.execute('INSERT INTO sessions(day,started_at,duration_sec,active_sec,moves_done,moves_json,workout,workout_name) VALUES(?,?,?,?,?,?,?,?)',
+                        (day, started, dur, act, done, json.dumps(clean_moves), wid, wname))
         sid = cur.lastrowid
         c.executemany('INSERT INTO images(session_id,grp,move_idx,data) VALUES(?,?,?,?)', [(sid, g, mi, raw) for g, mi, raw in imgs])
         t = c.execute('SELECT COALESCE(SUM(duration_sec),0) s, COUNT(*) n FROM sessions WHERE day=?', (day,)).fetchone()
     return {'id': sid, 'day_total_sec': t['s'], 'day_sessions': t['n']}
+
+
+WID_RE = re.compile(r'^[A-Za-z0-9_-]{1,40}$')
+
+
+def list_workouts():
+    """扫描 workouts/<id>/workout.json,返回可选的运动项目"""
+    out = []
+    base = os.path.join(ROOT, 'workouts')
+    for name in sorted(os.listdir(base)) if os.path.isdir(base) else []:
+        f = os.path.join(base, name, 'workout.json')
+        if not WID_RE.match(name) or not os.path.isfile(f):
+            continue
+        try:
+            with open(f, encoding='utf-8') as fh:
+                d = json.load(fh)
+        except (OSError, ValueError):
+            continue
+        out.append({'id': name, 'name': d.get('name', name), 'desc': d.get('desc', ''), 'groups': d.get('groups', 1),
+                    'movesPerGroup': d.get('movesPerGroup', 1), 'reps': d.get('reps', 10)})
+    return out
 
 
 def list_days():
@@ -317,6 +346,8 @@ class H(SimpleHTTPRequestHandler):
                 with db() as c:
                     cur = c.execute('DELETE FROM sessions WHERE id=?', (int(parts[2]),))
                 return self._json({'deleted': cur.rowcount})
+            if method == 'GET' and parts == ['api', 'workouts']:
+                return self._json(list_workouts())
             if method == 'GET' and parts == ['api', 'music']:
                 return self._json(list_music())
             if method == 'PUT' and parts == ['api', 'music']:

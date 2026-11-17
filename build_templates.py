@@ -53,6 +53,8 @@ for m in range(4):
         conf[m][int(np.argmin(sc))]+=1
         own_ok+= sc[m]<ACCEPT; tot+=1
 print(conf.astype(int)); print('own accept rate',own_ok/tot)
-json.dump({'segments':segout,'templates':tpl,'liftThr':LIFT_THR,'accept':ACCEPT,'reps':20,'restSec':10,
+META={'id':'fatburn','name':'燃脂跟练','desc':'5 组 × 4 个动作(胯下击掌 / 提膝下压 / 对侧提膝 / 同侧提膝)','groups':5,'movesPerGroup':4,
+ 'counter':'kneeLift','audio':'workout.m4a','video':'workout.mp4','groupRestSec':120}
+json.dump({**META,'segments':segout,'templates':tpl,'liftThr':LIFT_THR,'accept':ACCEPT,'reps':20,'restSec':10,
  'featNames':['同侧腕-膝','对侧腕-膝','同侧肘-膝','对侧肘-膝','双腕间距','腕高(相对髋)','最高腕-膝高差','膝高']},
- open('templates.json','w',encoding='utf-8'),ensure_ascii=False,indent=1)
+ open('workouts/fatburn/workout.json','w',encoding='utf-8'),ensure_ascii=False,indent=1)

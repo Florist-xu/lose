@@ -1,4 +1,13 @@
 {
+ "id": "fatburn",
+ "name": "燃脂跟练",
+ "desc": "5 组 × 4 个动作(胯下击掌 / 提膝下压 / 对侧提膝 / 同侧提膝)",
+ "groups": 5,
+ "movesPerGroup": 4,
+ "counter": "kneeLift",
+ "audio": "workout.m4a",
+ "video": "workout.mp4",
+ "groupRestSec": 120,
  "segments": [
   {
    "group": 0,
