@@ -2,7 +2,14 @@ import { FilesetResolver, PoseLandmarker } from './lib/package/vision_bundle.mjs
 
 const $ = id => document.getElementById(id);
 const GROUP_CN = ['第一组', '第二组', '第三组', '第四组', '第五组'];
-const cam = $('cam'), overlay = $('overlay'), ctx = overlay.getContext('2d'), ref = $('ref');
+const cam = $('cam'), overlay = $('overlay'), ctx = overlay.getContext('2d'), ref = $('ref'), bgm = $('bgm');
+// 示范画面(视频,可选/静音)与独立音频(bgm)一起按当前动作的片段同步;视频缺失也不影响声音
+ref.muted = true;
+let refOk = true;
+ref.addEventListener('error', () => { refOk = false; ref.closest('.card').style.display = 'none'; });
+const mSeek = t => { try { bgm.currentTime = t; } catch {} if (refOk) try { ref.currentTime = t; } catch {} };
+const mPause = () => { bgm.pause(); if (refOk) ref.pause(); };
+const mPlay = () => { bgm.muted = !$('sound').checked; bgm.play().catch(() => {}); if (refOk) ref.play().catch(() => {}); };
 let DATA, landmarker = null;
 
 // ---------- 状态 ----------
@@ -75,25 +82,25 @@ function renderHud() {
 // ---------- 流程 ----------
 function resetCount() { S.rep = 0; S.flags = { L: false, R: false }; S.sideCnt = { L: 0, R: 0 }; S.moveTime = 0; S.lifts = { L: mkLift(), R: mkLift() }; }
 function startRest(sec = DATA.restSec) {
-  resetCount(); S.phase = 'rest'; S.restLeft = sec; ref.pause();
-  ref.currentTime = seg().start + 1; renderChips(); renderHud();
+  resetCount(); S.phase = 'rest'; S.restLeft = sec; mPause();
+  mSeek(seg().start + 1); renderChips(); renderHud();
   showBig(`${GROUP_CN[S.g]} · ${tpl().name}`, Math.ceil(S.restLeft), '准备,站到画面中');
   setMsg('休息 / 准备中…');
 }
 function startActive() {
   S.phase = 'active'; hideBig(); beep(1200, 0.25); renderChips();
   setMsg('开始!左右腿各抬一次算 1 次', '');
-  ref.muted = !$('sound').checked; ref.currentTime = seg().start + 1; ref.play().catch(() => {});
+  mSeek(seg().start + 1); mPlay();
 }
 function completeMove() {
   S.doneSet.add(idx()); S.moveTimes[idx()] = S.moveTime; beep(1500, 0.4, 0.2);
-  ref.pause();
+  mPause();
   if (idx() >= 19) return finish();
   const nm = idx() + 1; S.g = Math.floor(nm / 4); S.m = nm % 4;
   startRest();
 }
 function finish() {
-  S.phase = 'done'; ref.pause();
+  S.phase = 'done'; mPause();
   const lines = DATA.segments.map((s, i) => '').length; // eslint-disable-line
   showBig('🎉 全部完成!', fmt(S.totalTime), '5 组 × 4 动作 × 20 次 总用时');
   setMsg('完成!刷新页面可重新开始', 'ok'); renderChips();
@@ -156,7 +163,7 @@ function loop(now) {
       if (S.restLeft <= 0) startActive();
     } else {
       S.moveTime += dt;
-      const s = seg(); if (ref.currentTime > s.end - 0.5) ref.currentTime = s.start + 1; // 循环示范片段
+      const s = seg(); if (bgm.currentTime > s.end - 0.5 || bgm.currentTime < s.start) mSeek(s.start + 1); // 循环当前动作的音乐/示范片段
     }
     renderHud();
   }
@@ -165,12 +172,12 @@ function loop(now) {
 
 // ---------- 事件 ----------
 $('mirror').onchange = e => { cam.classList.toggle('mirror', e.target.checked); overlay.classList.toggle('mirror', e.target.checked); };
-$('sound').onchange = e => { ref.muted = !e.target.checked; };
+$('sound').onchange = e => { bgm.muted = !e.target.checked; };
 $('debug').onchange = e => { $('dbgBox').style.display = e.target.checked ? 'block' : 'none'; };
 $('btnSkip').onclick = () => { if (S.phase === 'active' || S.phase === 'rest') completeMove(); };
 $('btnPause').onclick = () => {
   S.paused = !S.paused; $('btnPause').textContent = S.paused ? '继续' : '暂停';
-  if (S.paused) ref.pause(); else if (S.phase === 'active') ref.play().catch(() => {});
+  if (S.paused) mPause(); else if (S.phase === 'active') mPlay();
   setMsg(S.paused ? '已暂停' : '继续');
 };
 addEventListener('keydown', e => { if (e.key === 'n') $('btnSkip').click(); if (e.key === ' ') { e.preventDefault(); $('btnPause').click(); } });
@@ -185,7 +192,8 @@ $('btnStart').onclick = async () => {
     const mk = delegate => PoseLandmarker.createFromOptions(fileset, { baseOptions: { modelAssetPath: './lib/pose_landmarker_full.task', delegate }, runningMode: 'VIDEO', numPoses: 1 });
     try { landmarker = await mk('GPU'); } catch { landmarker = await mk('CPU'); }
     cam.srcObject = await navigator.mediaDevices.getUserMedia({ video: { width: 1280, height: 720, facingMode: 'user' }, audio: false });
-    await cam.play(); await ref.play().then(() => ref.pause()).catch(() => {}); // 在用户手势内解锁音频
+    await cam.play();
+    await Promise.all([bgm.play().then(() => bgm.pause()).catch(() => {}), ref.play().then(() => ref.pause()).catch(() => {})]); // 在用户手势内解锁音频(iOS)
     $('btnPause').disabled = $('btnSkip').disabled = false;
     S.g = 0; S.m = 0; startRest();
   } catch (err) { setMsg('启动失败:' + err.message + '(请用 http://localhost:8080 打开并允许摄像头)', 'bad'); $('btnStart').disabled = false; console.error(err); }

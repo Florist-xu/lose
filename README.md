@@ -33,4 +33,5 @@ sh start.sh
 - `app.js` / `index.html`:前端识别与流程
 - `server.js` / `server.py`:静态服务器(node 版 / Python 备用版),`start.sh`、`start.bat` 为启动脚本
 - `lib/`:本地 MediaPipe 库与姿态模型(离线可用)
-- `media/workout.mp4`:压缩后的示范视频(含音频)
+- `media/workout.m4a`:从原视频提取的音频(训练音乐/口令),按当前动作的片段循环播放
+- `media/workout.mp4`:示范画面(可选,缺失也不影响声音)
