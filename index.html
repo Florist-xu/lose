@@ -36,6 +36,15 @@ aside{display:flex;flex-direction:column;gap:12px}
 .chip{padding:5px 2px;text-align:center;border-radius:6px;background:#0003;border:1px solid transparent;color:var(--mut);cursor:pointer}
 .chip.cur{border-color:var(--ac);color:var(--ac)}.chip.done{background:#3ddc8433;color:var(--ok)}
 .row{display:flex;gap:8px;flex-wrap:wrap}label{font-size:13px;color:var(--mut);display:flex;gap:6px;align-items:center}
+.fsbar{display:none;position:absolute;left:0;right:0;bottom:calc(10px + env(safe-area-inset-bottom));justify-content:center;gap:8px;z-index:5}
+.fsbar button{background:#000a;backdrop-filter:blur(4px);padding:8px 14px}
+body:has(.stage.full){overflow:hidden}
+.stage.full{position:fixed;inset:0;z-index:40;width:100vw;height:100vh;height:100dvh;aspect-ratio:auto;border-radius:0}
+.stage.full video,.stage.full canvas{object-fit:contain}
+.stage.full .fsbar{display:flex}
+.stage.full .hud{padding:calc(12px + env(safe-area-inset-top)) calc(16px + env(safe-area-inset-right)) 12px calc(16px + env(safe-area-inset-left))}
+.stage.full .count{bottom:calc(64px + env(safe-area-inset-bottom));right:calc(16px + env(safe-area-inset-right))}
+.stage.full .msg{bottom:calc(64px + env(safe-area-inset-bottom));left:calc(16px + env(safe-area-inset-left))}
 .modal{position:fixed;inset:0;background:#000c;display:none;align-items:center;justify-content:center;padding:14px;z-index:50}
 .modal.show{display:flex}
 .mbox{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px;width:min(560px,100%);max-height:90vh;overflow:auto}
@@ -74,6 +83,7 @@ aside{display:flex;flex-direction:column;gap:12px}
         <div style="text-align:right"><div class="t">本动作用时</div><div class="n" id="hTimer">00:00</div></div></div>
       <div class="count"><span id="cnt">0</span><small>/20</small></div>
       <div class="msg" id="msg">点击右上角"开启摄像头并开始"</div>
+      <div class="fsbar"><button id="fsPause">暂停</button><button id="fsSkip">跳过</button><button id="fsEnd">结束</button><button id="fsExit">退出全屏</button></div>
       <div class="big" id="big"><div class="h" id="bigH"></div><div class="cd" id="bigCd"></div><div class="s" id="bigS"></div></div>
     </div>
     <div class="card dbg" id="dbgBox" style="margin-top:12px;display:none"></div>

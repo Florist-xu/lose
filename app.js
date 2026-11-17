@@ -12,6 +12,30 @@ const mPause = () => { bgm.pause(); if (refOk) ref.pause(); };
 const mPlay = () => { bgm.muted = !$('sound').checked; bgm.play().catch(() => {}); if (refOk) ref.play().catch(() => {}); };
 let DATA, landmarker = null;
 
+// ---------- 全屏(开始训练时铺满屏幕,结束后自动退出) ----------
+// 桌面/安卓用原生全屏;iPhone 的 Safari 不支持元素全屏,自动退化为"页面内铺满"。两种方式都带画面内按钮条。
+const stage = document.querySelector('.stage');
+let nativeFS = false;
+function enterFS() {
+  stage.classList.add('full');
+  const req = stage.requestFullscreen || stage.webkitRequestFullscreen;
+  if (req) { try { Promise.resolve(req.call(stage)).then(() => { nativeFS = true; }).catch(() => {}); } catch {} }
+}
+function exitFS() {
+  stage.classList.remove('full');
+  const fe = document.fullscreenElement || document.webkitFullscreenElement;
+  nativeFS = false;
+  if (fe) { try { Promise.resolve((document.exitFullscreen || document.webkitExitFullscreen).call(document)).catch(() => {}); } catch {} }
+}
+const onFSChange = () => { if (nativeFS && !(document.fullscreenElement || document.webkitFullscreenElement)) { nativeFS = false; stage.classList.remove('full'); syncFS(); } }; // 用户按 Esc 退出
+document.addEventListener('fullscreenchange', onFSChange);
+document.addEventListener('webkitfullscreenchange', onFSChange);
+$('fsExit').onclick = () => { if (stage.classList.contains('full')) { exitFS(); $('fsExit').textContent = '全屏'; } else { enterFS(); } };
+const syncFS = () => { $('fsPause').textContent = $('btnPause').textContent; $('fsExit').textContent = stage.classList.contains('full') ? '退出全屏' : '全屏'; };
+$('fsPause').onclick = () => { $('btnPause').click(); syncFS(); };
+$('fsSkip').onclick = () => $('btnSkip').click();
+$('fsEnd').onclick = () => $('btnEnd').click();
+
 // ---------- 状态 ----------
 const S = {
   phase: 'idle',        // idle | rest | active | done
@@ -141,7 +165,7 @@ function endWorkout() {
     if (S.moveTime > 1 && S.moveTimes[idx()] === undefined) { S.moveTimes[idx()] = S.moveTime; S.moveReps[idx()] = S.rep; }
     if (S.imgs[S.g] === undefined) capture(S.g);
   }
-  S.phase = 'done'; mPause(); hideBig(); renderChips();
+  S.phase = 'done'; mPause(); hideBig(); renderChips(); exitFS();
   $('btnEnd').disabled = $('btnPause').disabled = $('btnSkip').disabled = true;
   showSavePrompt();
 }
@@ -286,13 +310,14 @@ $('btnEnd').onclick = () => { if ((S.phase === 'active' || S.phase === 'rest') &
 $('btnHistory').onclick = openHistory;
 $('btnSkip').onclick = () => { if (S.phase === 'active' || S.phase === 'rest') completeMove(); };
 $('btnPause').onclick = () => {
-  S.paused = !S.paused; $('btnPause').textContent = S.paused ? '继续' : '暂停';
+  S.paused = !S.paused; $('btnPause').textContent = S.paused ? '继续' : '暂停'; syncFS();
   if (S.paused) mPause(); else if (S.phase === 'active') mPlay();
   setMsg(S.paused ? '已暂停' : '继续');
 };
 addEventListener('keydown', e => { if (e.key === 'n') $('btnSkip').click(); if (e.key === ' ') { e.preventDefault(); $('btnPause').click(); } });
 
 $('btnStart').onclick = async () => {
+  enterFS();
   $('btnStart').disabled = true; setMsg('正在加载模型与摄像头…');
   try {
     try { actx ??= new AudioContext(); await actx.resume(); beep(1, 0.01, 0.001); } catch {} // 在点击手势内解锁提示音(iOS)
@@ -306,7 +331,7 @@ $('btnStart').onclick = async () => {
     await Promise.all([bgm.play().then(() => bgm.pause()).catch(() => {}), ref.play().then(() => ref.pause()).catch(() => {})]); // 在用户手势内解锁音频(iOS)
     $('btnPause').disabled = $('btnSkip').disabled = $('btnEnd').disabled = false;
     S.g = 0; S.m = 0; startRest();
-  } catch (err) { setMsg('启动失败:' + err.message + '(请用 http://localhost:8080 打开并允许摄像头)', 'bad'); $('btnStart').disabled = false; console.error(err); }
+  } catch (err) { exitFS(); setMsg('启动失败:' + err.message + '(请用 http://localhost:8080 打开并允许摄像头)', 'bad'); $('btnStart').disabled = false; console.error(err); }
 };
 fetch('templates.json').then(r => r.json()).then(d => { DATA = d; renderChips(); renderHud(); });
 requestAnimationFrame(loop);
