@@ -1,6 +1,7 @@
 # 跟练打卡:5 组 × 4 动作 × 20 次(摄像头识别)
 
-摄像头姿态识别(MediaPipe)+ 计数 + 计时,每个动作满 20 次自动切换下一动作/下一组,并播放示范视频的音频。
+摄像头姿态识别(MediaPipe)+ 计数 + 计时,每个动作满 20 次自动切换下一动作/下一组,并播放视频里提取的音频。
+训练结束后可**保存或放弃**当天记录;每组会**随机抓拍一张**照片;记录存入 **SQLite**。
 
 ## 在 Termux 启动
 ```bash
@@ -10,28 +11,52 @@ git clone https://github.com/Florist-xu/lose.git
 cd lose
 sh start.sh
 ```
-`start.sh` 会优先用 node,node 不可用时自动改用 Python(`server.py`),功能完全一样。
+然后在手机浏览器打开 `http://localhost:6060`,允许摄像头权限(localhost 才能用摄像头)。
+更新:`cd ~/lose && git pull`。
 
-然后在手机浏览器打开 `http://localhost:8080`,允许摄像头权限(localhost 才能用摄像头)。
+> 服务器只依赖 Python 标准库(含 sqlite3),不需要 node。
 
-### 常见问题
-- **`CANNOT LINK EXECUTABLE "node"`**:Termux 的 nodejs 与系统库版本不匹配。先 `pkg upgrade -y`;仍不行就用 `start.sh`(自动走 Python),或 `pkg install nodejs-lts`。
-- **想让别的设备(如 iPhone)访问**:摄像头要求 HTTPS,先生成证书再启动:
-  ```bash
-  sh gen-cert.sh 手机的局域网IP     # 例如 sh gen-cert.sh 192.168.1.8
-  sh start.sh
-  ```
-  然后在另一台设备打开 `https://手机的局域网IP:8443`,首次点"继续访问"。
-- **端口**:默认 HTTP 8080、HTTPS 8443;可用 `PORT=9000 SPORT=9443 sh start.sh` 修改。
+### 让别的设备(如 iPhone)访问
+摄像头要求 HTTPS,先生成证书再启动:
+```bash
+sh gen-cert.sh 本机的局域网IP     # 例如 sh gen-cert.sh 192.168.1.8
+sh start.sh
+```
+然后在另一台设备打开 `https://本机的局域网IP:6061`,首次点"继续访问"。
+
+### 端口
+默认 HTTP **6060**、HTTPS **6061**;可修改:`PORT=7000 SPORT=7001 sh start.sh`。
 
 ## Windows 启动
-双击 `start.bat`。
+双击 `start.bat`(需要已安装 Python)。
+
+## 训练记录
+- 点"结束训练"或 5 组全部完成后,会弹出保存提示:**保存记录 / 放弃保存**。
+- 记录内容:日期、总用时(含休息)、动作用时、完成动作数、每个动作的次数与用时、每组随机抓拍的一张图。
+- 抓拍规则:每组随机挑一个动作、在动作开始后的随机时刻拍一张;跳过/提前结束时会兜底补拍。
+- 右上角"历史记录":按天汇总锻炼时长,点开可看每次训练和图片,也可删除。
+- 数据保存在 `data/workout.db`(SQLite,已加入 .gitignore,不会上传)。备份只需复制这个文件。
+  可用环境变量 `DB_PATH` 改位置。
+
+### 接口(供参考)
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| POST | `/api/sessions` | 保存一次训练(含 base64 JPEG 图片) |
+| GET | `/api/days` | 按天汇总 |
+| GET | `/api/sessions?day=YYYY-MM-DD` | 某天的训练列表 |
+| GET | `/api/images/<id>` | 图片 |
+| DELETE | `/api/sessions/<id>` | 删除一条(连同图片) |
+
+> 注意:接口没有登录验证,仅适合在自己的手机/家庭局域网使用,不要暴露到公网。
 
 ## 文件
 - `templates.json`:20 个动作的时间段与识别模板(由参考视频提取)
 - `build_templates.py`:模板生成脚本(需要 `pose_raw.json`,未提交)
-- `app.js` / `index.html`:前端识别与流程
-- `server.js` / `server.py`:静态服务器(node 版 / Python 备用版),`start.sh`、`start.bat` 为启动脚本
+- `app.js` / `index.html`:前端识别、流程、保存与历史
+- `server.py`:服务器(静态文件白名单 + Range + SQLite 接口);`start.sh` / `start.bat` 启动脚本
 - `lib/`:本地 MediaPipe 库与姿态模型(离线可用)
-- `media/workout.m4a`:从原视频提取的音频(训练音乐/口令),按当前动作的片段循环播放
+- `media/workout.m4a`:从原视频提取的音频,按当前动作的片段循环播放
 - `media/workout.mp4`:示范画面(可选,缺失也不影响声音)
+
+## 常见问题
+- **`CANNOT LINK EXECUTABLE "node"`**:本项目已不使用 node,直接 `sh start.sh` 即可。

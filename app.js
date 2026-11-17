@@ -18,7 +18,8 @@ const S = {
   g: 0, m: 0,           // 当前组 / 动作
   rep: 0, flags: { L: false, R: false }, sideCnt: { L: 0, R: 0 },
   restLeft: 0, moveTime: 0, totalTime: 0, paused: false,
-  doneSet: new Set(), moveTimes: [],
+  doneSet: new Set(), moveTimes: [], moveReps: [],
+  startedAt: null, active: 0, imgs: {}, plan: {}, saved: false,
   lifts: { L: mkLift(), R: mkLift() },
 };
 function mkLift() { return { lifting: false, minK: 9, feat: null }; }
@@ -71,6 +72,7 @@ function renderChips() {
 }
 $('chips').addEventListener('click', e => {
   const i = e.target.dataset?.i; if (i == null || !landmarker) return;
+  if (S.phase === 'active' && S.moveTime > 2 && S.imgs[S.g] === undefined) capture(S.g); // 离开当前组前兜底抓拍
   S.g = Math.floor(i / 4); S.m = i % 4; startRest(3);
 });
 function renderHud() {
@@ -89,21 +91,126 @@ function startRest(sec = DATA.restSec) {
 }
 function startActive() {
   S.phase = 'active'; hideBig(); beep(1200, 0.25); renderChips();
+  S.startedAt ??= new Date();
+  S.plan[S.g] ??= { m: Math.floor(Math.random() * 4), at: 4 + Math.random() * 14 }; // 每组随机抓拍:随机动作 + 随机时刻
   setMsg('开始!左右腿各抬一次算 1 次', '');
   mSeek(seg().start + 1); mPlay();
 }
 function completeMove() {
-  S.doneSet.add(idx()); S.moveTimes[idx()] = S.moveTime; beep(1500, 0.4, 0.2);
+  S.doneSet.add(idx()); S.moveTimes[idx()] = S.moveTime; S.moveReps[idx()] = S.rep; beep(1500, 0.4, 0.2);
   mPause();
+  const p = S.plan[S.g]; if (S.imgs[S.g] === undefined && S.phase === 'active' && (S.m === 3 || (p && p.m === S.m))) capture(S.g); // 兜底:保证每组有图
   if (idx() >= 19) return finish();
   const nm = idx() + 1; S.g = Math.floor(nm / 4); S.m = nm % 4;
   startRest();
 }
-function finish() {
-  S.phase = 'done'; mPause();
-  const lines = DATA.segments.map((s, i) => '').length; // eslint-disable-line
-  showBig('🎉 全部完成!', fmt(S.totalTime), '5 组 × 4 动作 × 20 次 总用时');
-  setMsg('完成!刷新页面可重新开始', 'ok'); renderChips();
+function finish() { setMsg('全部完成!', 'ok'); endWorkout(); }
+
+// ---------- 随机抓拍 ----------
+function capture(g) {
+  if (!cam.videoWidth) return;
+  const w = Math.min(640, cam.videoWidth), h = Math.round(w * cam.videoHeight / cam.videoWidth);
+  const c = document.createElement('canvas'); c.width = w; c.height = h;
+  const x = c.getContext('2d');
+  if ($('mirror').checked) { x.translate(w, 0); x.scale(-1, 1); }
+  x.drawImage(cam, 0, 0, w, h);
+  S.imgs[g] = { data: c.toDataURL('image/jpeg', 0.72), move_idx: idx() };
+}
+
+// ---------- 结束 / 保存 / 历史 ----------
+const pad = n => String(n).padStart(2, '0');
+const dayOf = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+const fmtDur = s => `${Math.floor(s / 60)}分${pad(Math.round(s % 60))}秒`;
+const esc = t => String(t).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const modal = $('modal'), mbox = $('mbox');
+function openModal(html, dismissable = false) { mbox.innerHTML = html; mbox.dataset.dismiss = dismissable ? '1' : ''; modal.classList.add('show'); }
+const closeModal = () => modal.classList.remove('show');
+modal.addEventListener('click', e => { if (e.target === modal && mbox.dataset.dismiss) closeModal(); });
+const setNote = (t, cls = '') => { const e = $('note'); if (e) { e.textContent = t; e.className = 'note ' + cls; } };
+
+function buildPayload() {
+  const moves = [];
+  S.moveTimes.forEach((sec, i) => { if (sec !== undefined) moves.push({ idx: i, reps: S.moveReps[i] ?? 0, sec: Math.round(sec) }); });
+  const images = Object.entries(S.imgs).map(([g, v]) => ({ group: +g, move_idx: v.move_idx, data: v.data }));
+  const t0 = S.startedAt ?? new Date();
+  return { day: dayOf(t0), started_at: t0.toISOString(), duration_sec: Math.round(S.totalTime), active_sec: Math.round(S.active), moves_done: S.doneSet.size, moves, images };
+}
+function endWorkout() {
+  if (S.phase === 'idle') return;
+  if (S.phase === 'active') {
+    if (S.moveTime > 1 && S.moveTimes[idx()] === undefined) { S.moveTimes[idx()] = S.moveTime; S.moveReps[idx()] = S.rep; }
+    if (S.imgs[S.g] === undefined) capture(S.g);
+  }
+  S.phase = 'done'; mPause(); hideBig(); renderChips();
+  $('btnEnd').disabled = $('btnPause').disabled = $('btnSkip').disabled = true;
+  showSavePrompt();
+}
+function showSavePrompt() {
+  const p = buildPayload();
+  if (p.duration_sec < 5) {
+    openModal(`<h2>训练时间太短</h2><div class="sub">不足 5 秒,没有可保存的记录。</div><div class="btns"><button id="bAgain" class="pri">重新开始</button></div>`);
+    $('bAgain').onclick = () => location.reload();
+    return;
+  }
+  const thumbs = [0, 1, 2, 3, 4].map(g => `<figure>${S.imgs[g] ? `<img src="${S.imgs[g].data}" alt="">` : '<img alt="">'}第${g + 1}组</figure>`).join('');
+  openModal(`<h2>🎉 训练结束</h2><div class="sub">${esc(p.day)} · 是否保存今天的锻炼记录?</div>
+    <div class="kv"><div><b>${fmtDur(p.duration_sec)}</b><span>总用时(含休息)</span></div><div><b>${fmtDur(p.active_sec)}</b><span>动作用时</span></div>
+    <div><b>${p.moves_done}/20</b><span>完成动作</span></div><div><b>${p.images.length}/5</b><span>每组随机抓拍</span></div></div>
+    <div class="thumbs">${thumbs}</div>
+    <div class="btns"><button id="bSave" class="pri">保存记录</button><button id="bDiscard" class="danger">放弃保存</button></div><div id="note" class="note"></div>`);
+  $('bSave').onclick = () => doSave(p);
+  $('bDiscard').onclick = () => {
+    if (!confirm('确定放弃本次记录吗?放弃后无法找回。')) return;
+    S.imgs = {};
+    openModal(`<h2>已放弃保存</h2><div class="sub">本次训练不会计入每日记录。</div><div class="btns"><button id="bAgain" class="pri">重新开始</button><button id="bClose">关闭</button></div>`, true);
+    $('bAgain').onclick = () => location.reload(); $('bClose').onclick = closeModal;
+  };
+}
+async function doSave(p) {
+  if (S.saved) return;
+  $('bSave').disabled = $('bDiscard').disabled = true; setNote('保存中…');
+  try {
+    const r = await fetch('api/sessions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p) });
+    const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status));
+    S.saved = true;
+    openModal(`<h2>✅ 已保存</h2><div class="sub">今天累计 ${j.day_sessions} 次训练,共 ${fmtDur(j.day_total_sec)}。</div>
+      <div class="btns"><button id="bHist" class="pri">查看历史</button><button id="bAgain">重新开始</button></div>`, true);
+    $('bHist').onclick = openHistory; $('bAgain').onclick = () => location.reload();
+  } catch (e) {
+    $('bSave').disabled = $('bDiscard').disabled = false;
+    setNote('保存失败:' + e.message + '(可点"保存记录"重试)', 'bad');
+  }
+}
+async function openHistory() {
+  openModal('<h2>历史记录</h2><div class="sub">加载中…</div>', true);
+  try {
+    const days = await (await fetch('api/days')).json();
+    if (!Array.isArray(days)) throw new Error(days.error || '返回格式错误');
+    const rows = days.map(d => `<div class="dayrow" data-day="${esc(d.day)}"><span>${esc(d.day)}</span><span>${d.sessions} 次 · ${fmtDur(d.total_sec)}</span></div>`).join('');
+    openModal(`<h2>历史记录</h2><div class="sub">按天汇总的锻炼时长,点击查看详情</div>${rows || '<div class="sub">还没有记录</div>'}<div class="btns"><button id="bClose">关闭</button></div>`, true);
+    $('bClose').onclick = closeModal;
+    mbox.querySelectorAll('.dayrow').forEach(el => el.onclick = () => openDay(el.dataset.day));
+  } catch (e) {
+    openModal(`<h2>历史记录</h2><div class="note bad">加载失败:${esc(e.message)}</div><div class="btns"><button id="bClose">关闭</button></div>`, true);
+    $('bClose').onclick = closeModal;
+  }
+}
+async function openDay(day) {
+  try {
+    const list = await (await fetch('api/sessions?day=' + encodeURIComponent(day))).json();
+    const html = list.map(s => `<div class="sess"><b>${esc(new Date(s.started_at).toLocaleTimeString())}</b> · 总用时 ${fmtDur(s.duration_sec)} · 动作用时 ${fmtDur(s.active_sec)} · 完成 ${s.moves_done}/20
+      <div class="thumbs">${s.images.map(i => `<figure><img loading="lazy" src="api/images/${i.id}" alt="">第${i.grp + 1}组</figure>`).join('')}</div>
+      <button data-del="${s.id}" class="danger">删除这条</button></div>`).join('');
+    openModal(`<h2>${esc(day)}</h2>${html || '<div class="sub">当天没有记录</div>'}<div class="btns"><button id="bBack">返回</button><button id="bClose">关闭</button></div>`, true);
+    $('bBack').onclick = openHistory; $('bClose').onclick = closeModal;
+    mbox.querySelectorAll('[data-del]').forEach(b => b.onclick = async () => {
+      if (!confirm('确定删除这条记录(含图片)吗?')) return;
+      await fetch('api/sessions/' + b.dataset.del, { method: 'DELETE' }); openDay(day);
+    });
+  } catch (e) {
+    openModal(`<div class="note bad">加载失败:${esc(e.message)}</div><div class="btns"><button id="bBack">返回</button></div>`, true);
+    $('bBack').onclick = openHistory;
+  }
 }
 
 // ---------- 识别 ----------
@@ -162,7 +269,8 @@ function loop(now) {
       $('bigCd').textContent = Math.max(0, Math.ceil(S.restLeft));
       if (S.restLeft <= 0) startActive();
     } else {
-      S.moveTime += dt;
+      S.moveTime += dt; S.active += dt;
+      const pl = S.plan[S.g]; if (pl && S.imgs[S.g] === undefined && S.m === pl.m && S.moveTime >= pl.at) capture(S.g);
       const s = seg(); if (bgm.currentTime > s.end - 0.5 || bgm.currentTime < s.start) mSeek(s.start + 1); // 循环当前动作的音乐/示范片段
     }
     renderHud();
@@ -174,6 +282,8 @@ function loop(now) {
 $('mirror').onchange = e => { cam.classList.toggle('mirror', e.target.checked); overlay.classList.toggle('mirror', e.target.checked); };
 $('sound').onchange = e => { bgm.muted = !e.target.checked; };
 $('debug').onchange = e => { $('dbgBox').style.display = e.target.checked ? 'block' : 'none'; };
+$('btnEnd').onclick = () => { if ((S.phase === 'active' || S.phase === 'rest') && confirm('确定结束本次训练吗?')) endWorkout(); };
+$('btnHistory').onclick = openHistory;
 $('btnSkip').onclick = () => { if (S.phase === 'active' || S.phase === 'rest') completeMove(); };
 $('btnPause').onclick = () => {
   S.paused = !S.paused; $('btnPause').textContent = S.paused ? '继续' : '暂停';
@@ -194,7 +304,7 @@ $('btnStart').onclick = async () => {
     cam.srcObject = await navigator.mediaDevices.getUserMedia({ video: { width: 1280, height: 720, facingMode: 'user' }, audio: false });
     await cam.play();
     await Promise.all([bgm.play().then(() => bgm.pause()).catch(() => {}), ref.play().then(() => ref.pause()).catch(() => {})]); // 在用户手势内解锁音频(iOS)
-    $('btnPause').disabled = $('btnSkip').disabled = false;
+    $('btnPause').disabled = $('btnSkip').disabled = $('btnEnd').disabled = false;
     S.g = 0; S.m = 0; startRest();
   } catch (err) { setMsg('启动失败:' + err.message + '(请用 http://localhost:8080 打开并允许摄像头)', 'bad'); $('btnStart').disabled = false; console.error(err); }
 };
