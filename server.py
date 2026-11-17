@@ -10,6 +10,7 @@ from urllib.parse import urlparse, parse_qs, urljoin, unquote
 ROOT = os.path.dirname(os.path.abspath(__file__))
 PORT = int(os.environ.get('PORT', 6060))
 SPORT = int(os.environ.get('SPORT', 6061))
+PARSER_URL = os.environ.get('PARSER_URL', '').strip().rstrip('/')  # 可选:media-parser 服务地址,用于解析抖音等分享链接
 DB_PATH = os.environ.get('DB_PATH', os.path.join(ROOT, 'data', 'workout.db'))
 MAX_BODY = 20 * 1024 * 1024
 MAX_IMG = 2 * 1024 * 1024
@@ -184,6 +185,21 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
 DOUYIN_RE = re.compile(r'(^|\.)(douyin|iesdouyin|tiktok|toutiao)\.com$')
 
 
+def parse_via_service(link):
+    """调用 media-parser(PARSER_URL)把平台分享链接解析成 (音频直链, 标题)。"""
+    import urllib.parse
+    api = f'{PARSER_URL}/api/v1/parse?url=' + urllib.parse.quote(link, safe='')
+    try:
+        with urllib.request.urlopen(urllib.request.Request(api, headers={'User-Agent': 'Mozilla/5.0'}), timeout=40) as r:
+            j = json.loads(r.read(2_000_000))
+    except (urllib.error.URLError, OSError, ValueError):
+        raise ValueError('解析服务连不上,请确认 media-parser 已启动(PARSER_URL=' + PARSER_URL + ')')
+    d = j.get('data') or {}
+    if not j.get('succ') or not d.get('audio_url'):
+        raise ValueError('解析失败:' + str(j.get('retdesc') or '没有拿到音频地址') + '。可改为保存视频后上传')
+    return d['audio_url'], (d.get('title') or '')[:60]
+
+
 def import_music_link(text):
     """从直接的音频文件链接导入。抖音等平台页面链接受反爬保护,无法自动解析。"""
     m = re.search(r'https?://[^\s\u3000"\'<>]+', text or '')
@@ -191,11 +207,17 @@ def import_music_link(text):
         raise ValueError('没有找到链接')
     cur = m.group(0).rstrip('.,;)]}，。')
     opener = urllib.request.build_opener(_NoRedirect)
+    title_hint = ''
     for _ in range(5):
         u = urlparse(cur)
         if u.scheme not in ('http', 'https') or not u.hostname:
             raise ValueError('链接格式不对')
-        if DOUYIN_RE.search(u.hostname):
+        if DOUYIN_RE.search(u.hostname) and PARSER_URL:
+            cur, title_hint = parse_via_service(cur)
+            u = urlparse(cur)
+            if u.scheme not in ('http', 'https') or not u.hostname or DOUYIN_RE.search(u.hostname):
+                raise ValueError('解析结果不是有效的音频地址')
+        elif DOUYIN_RE.search(u.hostname):
             raise ValueError('抖音/TikTok 的分享链接有反爬保护,无法自动解析。请在抖音里"保存视频"到手机,再点上方"上传音频/视频文件"(mp4 也可以,只会取声音)')
         _check_host(u.hostname)
         try:
@@ -226,7 +248,7 @@ def import_music_link(text):
                     f.write(buf)
             if size < 1024:
                 raise ValueError('文件太小,不是有效的音频')
-            title = unquote(os.path.splitext(os.path.basename(u.path))[0]) or u.hostname
+            title = title_hint or unquote(os.path.splitext(os.path.basename(u.path))[0]) or u.hostname
             return add_music(title, ext, size, cur[:300], tmp)
         finally:
             if os.path.exists(tmp):

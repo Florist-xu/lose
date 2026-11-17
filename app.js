@@ -422,7 +422,7 @@ async function openMusic() {
     <div class="btns" style="margin-top:6px"><button id="mUpload" class="pri">上传音频/视频文件</button></div>
     <input id="mFile" type="file" accept=".mp3,.m4a,.aac,.wav,.ogg,.flac,.mp4,audio/*,video/mp4" style="display:none">
     <div style="display:flex;gap:8px;margin-top:10px"><input id="mLink" placeholder="粘贴音频直链(以 http 开头的 mp3/m4a 文件地址)" style="flex:1;min-width:0;padding:9px;border-radius:8px;border:1px solid var(--line);background:#0003;color:var(--fg)"><button id="mImport">导入</button></div>
-    <div class="note" style="color:var(--mut)">抖音等平台的分享链接有反爬保护,无法自动解析。可在抖音里「保存视频」,再点上方上传该文件(mp4 也行,只播放声音)。</div>
+    <div class="note" style="color:var(--mut)">可直接粘贴抖音分享文字/链接(需服务器已配置 PARSER_URL 并启动 media-parser,见 README);未配置时请在抖音里「保存视频」,再点上方上传该文件(mp4 也行,只播放声音)。</div>
     <div id="note" class="note"></div>
     <div style="margin:12px 0 6px;font-size:13px;color:var(--mut)">播放方式</div>
     <div class="dayrow" style="cursor:default"><label style="flex:1;gap:8px;color:var(--fg)"><input type="radio" name="rm" value="all" ${c === 'all' ? 'checked' : ''}>全部随机播放</label></div>
