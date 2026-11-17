@@ -37,10 +37,9 @@ sh start.sh
   - **粘贴音频直链**(直接指向音频文件的 http(s) 地址)导入。
   - 选择"全部随机"或指定某一首;可试听、删除。
 - **抖音分享链接解析(可选)**:本项目不内置解析器。如需粘贴抖音分享文字直接导入,请另外运行开源项目 [media-parser](https://github.com/ucmao/media-parser)(MIT;作者已声明可能在 2026-12-01 后删除大部分平台解析代码,建议尽早 fork 备份),然后启动本服务时指定它的地址:
-  ```bash
-  PARSER_URL=http://127.0.0.1:8051 sh start.sh
-  ```
-  服务器会向它取得音频直链并下载保存。media-parser 默认监听 `0.0.0.0`,建议只绑定本机(`app.run(host='127.0.0.1')`),需要 Python 3.10+;Windows 上还要补 `fcntl` 和 `tzdata`,Termux 上依赖(mini-racer、lxml)可能装不上,建议在电脑上运行。
+  - **Termux / Linux 一键方式**:先运行一次 `sh parser-setup.sh`(自动下载 media-parser;Termux 上 mini-racer 装不上会自动用替身,抖音仍可解析),之后每次 `sh start.sh` 会自动在后台启动它并设置 `PARSER_URL`。
+  - **手动方式**:自己启动 media-parser 后 `PARSER_URL=http://127.0.0.1:8051 sh start.sh`(需 Python 3.10+;Windows 还要补 `fcntl` 和 `tzdata`)。
+  - 它默认监听 `0.0.0.0`,脚本已改为只监听 127.0.0.1。
   未配置 `PARSER_URL` 时,请在抖音里"保存视频"到手机,再用"上传"选择该文件。解析依赖平台接口,随时可能失效。
 - 音乐文件保存在 `data/music/`(不会上传到 GitHub,避免版权问题),列表存在 SQLite 的 `music` 表。
 
