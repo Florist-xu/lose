@@ -35,9 +35,15 @@ for k,(a,b) in enumerate(segs):
 tpl=[]
 for m in range(4):
     A=np.array(acc[m])
-    tpl.append({'name':NAMES[m],'mean':A.mean(0).round(3).tolist(),'std':np.maximum(A.std(0),STD_FLOOR).round(3).tolist(),'samples':len(A)})
+    floor=np.full(8,STD_FLOOR); w=None
+    if m==1:  # 提膝下压:真人手臂/身材差异大,只重点看"手到膝盖"的距离与手相对膝盖的高度,其余特征放宽并降权
+        floor=np.maximum(floor,[.25,.25,.4,.4,.45,.35,.28,.35]); w=[1,1,.3,.3,.3,.7,1,.4]
+    t={'name':NAMES[m],'mean':A.mean(0).round(3).tolist(),'std':np.maximum(A.std(0),floor).round(3).tolist(),'samples':len(A)}
+    if w: t['w']=w
+    tpl.append(t)
 def score(t,f):
-    return float(np.mean(np.abs((np.array(f)-np.array(t['mean']))/np.array(t['std']))))
+    w=np.array(t.get('w',[1]*8),dtype=float)
+    return float((np.abs((np.array(f)-np.array(t['mean']))/np.array(t['std']))*w).sum()/w.sum())
 # 自检: 参考视频自身的混淆矩阵 (阈值 ACCEPT)
 ACCEPT=1.8
 conf=np.zeros((4,4)); own_ok=0; tot=0

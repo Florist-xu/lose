@@ -80,7 +80,7 @@ const S = {
   groupBreak: false, startedAt: null, active: 0, imgs: {}, plan: {}, saved: false,
   lifts: { L: mkLift(), R: mkLift() },
 };
-function mkLift() { return { lifting: false, minK: 9, feat: null }; }
+function mkLift() { return { lifting: false, minK: 9, feat: null, best: null }; }
 const idx = () => S.g * 4 + S.m;
 const seg = () => DATA.segments[idx()];
 const tpl = () => DATA.templates[S.m];
@@ -110,7 +110,7 @@ function kneeVal(lm, side) {
   const t = Math.hypot(((lm[11].x + lm[12].x) / 2 - (lm[23].x + lm[24].x) / 2) * aspect, (lm[11].y + lm[12].y) / 2 - (lm[23].y + lm[24].y) / 2) + 1e-6;
   return side === 'L' ? (lm[25].y - lm[23].y) / t : (lm[26].y - lm[24].y) / t;
 }
-const score = (t, f) => f.reduce((s, v, i) => s + Math.abs((v - t.mean[i]) / t.std[i]), 0) / f.length;
+const score = (t, f) => { let s = 0, ws = 0; for (let i = 0; i < f.length; i++) { const w = t.w ? t.w[i] : 1; s += w * Math.abs((f[i] - t.mean[i]) / t.std[i]); ws += w; } return s / ws; };
 const accept = () => +$('sens').value;
 
 // ---------- UI ----------
@@ -291,14 +291,16 @@ function onLift(side) {
     }
   } else {
     const all = DATA.templates.map((t, i) => [score(t, l.feat), i]).sort((a, b) => a[0] - b[0]);
-    setMsg(all[0][0] < lim && all[0][1] !== S.m ? `这个更像「${DATA.templates[all[0][1]].name}」,请做「${tpl().name}」` : `「${tpl().name}」手部/抬腿不标准,请对照右侧示范`, 'bad');
+    const f = l.feat; let hint = `「${tpl().name}」手部/抬腿不标准,请对照右侧示范`;
+    if (S.m === 1) hint = f[7] > -0.12 ? '提膝下压:膝盖再抬高一点(至少到腰部)' : Math.max(f[0], f[1]) > 0.75 ? '提膝下压:双手要按到抬起的膝盖上' : hint;
+    setMsg(all[0][0] < lim && all[0][1] !== S.m ? `这个更像「${DATA.templates[all[0][1]].name}」,请做「${tpl().name}」` : hint, 'bad');
   }
   if ($('debug').checked) $('dbgBox').textContent = `side=${side} score=${sc.toFixed(2)} lim=${lim}\nfeat=` + l.feat.map(v => v.toFixed(2)).join(' ') + '\n' + DATA.templates.map(t => t.name + ':' + score(t, l.feat).toFixed(2)).join('  ');
 }
 function track(lm) {
   for (const side of ['L', 'R']) {
     const k = kneeVal(lm, side), l = S.lifts[side];
-    if (k < 0) { l.lifting = true; if (k < l.minK) { l.minK = k; l.feat = feats(lm, side); } }
+    if (k < 0) { l.lifting = true; if (k < l.minK) l.minK = k; const f = feats(lm, side), sc = score(tpl(), f); if (sc < (l.best ?? 1e9)) { l.best = sc; l.feat = f; } } // 抬腿过程中取与当前动作最匹配的一帧(手按到膝盖的时机因人而异)
     else if (l.lifting && k > 0.2) { if (S.phase === 'active' && !S.paused) onLift(side); S.lifts[side] = mkLift(); }
   }
 }
