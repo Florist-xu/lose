@@ -165,8 +165,14 @@ def delete_music(mid):
     return 1
 
 
+# 字节系 CDN:这些域名只会指向公网。手机开了代理/VPN 时会被解析成假内网地址(如 198.18.x.x),不应误拦
+TRUSTED_CDN = re.compile(r'(^|\.)(douyinstatic|douyinvod|douyincdn|douyinpic|amemv|bytecdn|byteimg|snssdk|pstatp|ixigua|zjcdn|bytedance|byteoversea)\.(com|cn|net)$')
+
+
 def _check_host(host):
     """防 SSRF:禁止访问内网/本机地址"""
+    if TRUSTED_CDN.search(host or ''):
+        return
     try:
         infos = socket.getaddrinfo(host, None)
     except OSError:
@@ -174,7 +180,7 @@ def _check_host(host):
     for i in infos:
         ip = ipaddress.ip_address(i[4][0])
         if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast or ip.is_unspecified:
-            raise ValueError('不允许访问内网地址')
+            raise ValueError(f'不允许访问内网地址({host} → {ip})')
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
