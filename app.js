@@ -9,7 +9,34 @@ let refOk = true;
 ref.addEventListener('error', () => { refOk = false; ref.closest('.card').style.display = 'none'; });
 const mSeek = t => { try { bgm.currentTime = t; } catch {} if (refOk) try { ref.currentTime = t; } catch {} };
 const mPause = () => { bgm.pause(); if (refOk) ref.pause(); };
-const mPlay = () => { bgm.muted = !$('sound').checked; bgm.play().catch(() => {}); if (refOk) ref.play().catch(() => {}); };
+const mPlay = () => {
+  bgm.muted = !$('sound').checked;
+  bgm.play().catch(() => {
+    setMsg('音乐被浏览器拦截,轻点一下屏幕即可开启', 'bad');
+    addEventListener('pointerdown', () => { if (S.phase === 'active' && !S.paused) bgm.play().catch(() => {}); }, { once: true });
+  });
+  if (refOk) ref.play().catch(() => {});
+};
+
+// 音乐文件改用 fetch 下载成 blob 再播放:iPhone/Safari 对"自签名 HTTPS"页面,
+// <audio src> 直连会加载失败,而 fetch 会沿用页面已信任的证书。加载状态显示在页头。
+const bgmState = t => { const e = $('bgmState'); if (e) e.textContent = t; };
+let bgmReady = false;
+(async () => {
+  const btn = $('btnStart'), label = btn.textContent;
+  btn.disabled = true; btn.textContent = '音乐加载中…'; bgmState('(加载中…)');
+  try {
+    const r = await fetch('media/workout.m4a'); if (!r.ok) throw new Error('HTTP ' + r.status);
+    const blob = new Blob([await r.arrayBuffer()], { type: 'audio/mp4' });
+    bgm.src = URL.createObjectURL(blob); bgm.load();
+    bgmReady = true; bgmState('(已就绪)');
+  } catch (e) {
+    console.warn('音频 fetch 失败,改用直连', e); bgm.src = 'media/workout.m4a'; bgm.load(); bgmReady = true; bgmState('(直连)');
+  }
+  bgm.addEventListener('error', () => bgmState('(加载失败)'));
+  btn.disabled = false; btn.textContent = label;
+})();
+
 let DATA, landmarker = null;
 
 // ---------- 全屏(开始训练时铺满屏幕,结束后自动退出) ----------
@@ -318,6 +345,8 @@ addEventListener('keydown', e => { if (e.key === 'n') $('btnSkip').click(); if (
 
 $('btnStart').onclick = async () => {
   enterFS();
+  try { actx ??= new AudioContext(); actx.resume(); } catch {}
+  bgm.muted = true; { const up = bgm.play(); if (up) up.then(() => { bgm.pause(); bgm.muted = !$('sound').checked; }).catch(() => {}); } // 解锁音乐(iOS)
   $('btnStart').disabled = true; setMsg('正在加载模型与摄像头…');
   try {
     try { actx ??= new AudioContext(); await actx.resume(); beep(1, 0.01, 0.001); } catch {} // 在点击手势内解锁提示音(iOS)
@@ -328,7 +357,7 @@ $('btnStart').onclick = async () => {
     try { landmarker = await mk('GPU'); } catch { landmarker = await mk('CPU'); }
     cam.srcObject = await navigator.mediaDevices.getUserMedia({ video: { width: 1280, height: 720, facingMode: 'user' }, audio: false });
     await cam.play();
-    await Promise.all([bgm.play().then(() => bgm.pause()).catch(() => {}), ref.play().then(() => ref.pause()).catch(() => {})]); // 在用户手势内解锁音频(iOS)
+    await ref.play().then(() => ref.pause()).catch(() => {});
     $('btnPause').disabled = $('btnSkip').disabled = $('btnEnd').disabled = false;
     S.g = 0; S.m = 0; startRest();
   } catch (err) { exitFS(); setMsg('启动失败:' + err.message + '(请用 http://localhost:8080 打开并允许摄像头)', 'bad'); $('btnStart').disabled = false; console.error(err); }
