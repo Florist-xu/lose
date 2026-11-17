@@ -10,6 +10,6 @@ fi
 [ -d "$D" ] || git clone --depth 1 https://github.com/ucmao/media-parser.git "$D"
 cd "$D"
 grep -vi 'mini-racer' requirements.txt > requirements.nomr.txt
-"$PY" -m pip install -r requirements.nomr.txt
+"$PY" -m pip install -r requirements.nomr.txt tzdata
 "$PY" -m pip install mini-racer >/dev/null 2>&1 && echo "mini-racer 已安装" || echo "mini-racer 装不上,使用替身(不影响抖音解析)"
 echo "完成。之后直接 sh start.sh 即可,会自动启动解析服务。"
