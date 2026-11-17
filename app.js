@@ -178,6 +178,8 @@ addEventListener('keydown', e => { if (e.key === 'n') $('btnSkip').click(); if (
 $('btnStart').onclick = async () => {
   $('btnStart').disabled = true; setMsg('正在加载模型与摄像头…');
   try {
+    try { actx ??= new AudioContext(); await actx.resume(); beep(1, 0.01, 0.001); } catch {} // 在点击手势内解锁提示音(iOS)
+    if (!navigator.mediaDevices?.getUserMedia) throw new Error('当前地址不是安全连接,浏览器禁用了摄像头。请用 https://' + location.hostname + ':8443 打开(或在本机用 localhost)');
     DATA = await (await fetch('templates.json')).json();
     const fileset = await FilesetResolver.forVisionTasks('./lib/package/wasm');
     const mk = delegate => PoseLandmarker.createFromOptions(fileset, { baseOptions: { modelAssetPath: './lib/pose_landmarker_full.task', delegate }, runningMode: 'VIDEO', numPoses: 1 });

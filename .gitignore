@@ -2,3 +2,4 @@ pose_raw.json
 server.log
 *.tgz
 .playwright-mcp/
+certs/
