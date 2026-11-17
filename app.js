@@ -142,7 +142,7 @@ function startRest(sec = DATA.restSec, groupBreak = false) {
   $('bigCd').classList.toggle('small', groupBreak);
   if (groupBreak) {
     showBig(`${GROUP_CN[S.g - 1]}完成 🎉 中场休息`, fmt(Math.ceil(S.restLeft)), `下一组:${GROUP_CN[S.g]} · ${tpl().name}`);
-    $('bigBtns').style.display = 'flex'; setMsg('中场休息中…'); playRestMusic();
+    $('bigBtns').style.display = 'flex'; $('bPauseMusic').textContent = '⏸ 音乐'; setMsg('中场休息中…'); playRestMusic();
   } else {
     $('bigBtns').style.display = 'none';
     showBig(`${GROUP_CN[S.g]} · ${tpl().name}`, Math.ceil(S.restLeft), '准备,站到画面中');
