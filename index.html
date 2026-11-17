@@ -41,7 +41,14 @@ aside{display:flex;flex-direction:column;gap:12px}
 body:has(.stage.full){overflow:hidden}
 .stage.full{position:fixed;inset:0;z-index:40;width:100vw;height:100vh;height:100dvh;aspect-ratio:auto;border-radius:0}
 .stage.full video,.stage.full canvas{object-fit:contain}
-.stage.full .fsbar{display:flex}
+.stage.full .fsbar,.stage.live .fsbar{display:flex}
+.stage.live:not(.full) .fsbar{top:74px;bottom:auto;left:16px;right:auto;justify-content:flex-start}
+.stage.live:not(.full) .fsbar button:not(#fsExit){display:none}
+body:has(.stage.full) #refCard{position:fixed;z-index:45;left:calc(12px + env(safe-area-inset-left));bottom:calc(64px + env(safe-area-inset-bottom));width:96px;padding:0;border:2px solid var(--ac);background:#000;border-radius:8px;overflow:hidden;pointer-events:none;box-shadow:0 2px 10px #000a}
+body:has(.stage.full) #refCard h3{display:none}
+body:has(.stage.full) #refCard .ref{max-height:none;border-radius:0}
+body.hideRef:has(.stage.full) #refCard{display:none}
+body:not(.hideRef) .stage.full .msg{left:calc(122px + env(safe-area-inset-left));max-width:calc(100% - 270px)}
 .stage.full .hud{padding:calc(12px + env(safe-area-inset-top)) calc(16px + env(safe-area-inset-right)) 12px calc(16px + env(safe-area-inset-left))}
 .stage.full .count{bottom:calc(64px + env(safe-area-inset-bottom));right:calc(16px + env(safe-area-inset-right))}
 .stage.full .msg{bottom:calc(64px + env(safe-area-inset-bottom));left:calc(16px + env(safe-area-inset-left))}
@@ -84,14 +91,14 @@ body:has(.stage.full){overflow:hidden}
         <div style="text-align:right"><div class="t">本动作用时</div><div class="n" id="hTimer">00:00</div></div></div>
       <div class="count"><span id="cnt">0</span><small>/20</small></div>
       <div class="msg" id="msg">点击右上角"开启摄像头并开始"</div>
-      <div class="fsbar"><button id="fsPause">暂停</button><button id="fsSkip">跳过</button><button id="fsEnd">结束</button><button id="fsExit">退出全屏</button></div>
+      <div class="fsbar"><button id="fsRef">隐藏示范</button><button id="fsPause">暂停</button><button id="fsSkip">跳过</button><button id="fsEnd">结束</button><button id="fsExit">退出全屏</button></div>
       <div class="big" id="big"><div class="h" id="bigH"></div><div class="cd" id="bigCd"></div><div class="s" id="bigS"></div>
         <div class="bigBtns" id="bigBtns" style="display:none"><button id="bSkipRest" class="pri">跳过休息</button><button id="bPauseMusic">⏸ 音乐</button><button id="bNextTrack">下一首</button></div></div>
     </div>
     <div class="card dbg" id="dbgBox" style="margin-top:12px;display:none"></div>
   </section>
   <aside>
-    <div class="card"><h3>示范画面(声音由独立音频播放)</h3><div class="ref"><video id="ref" src="media/workout.mp4" playsinline preload="auto"></video></div></div>
+    <div class="card" id="refCard"><h3>示范画面(声音由独立音频播放)</h3><div class="ref"><video id="ref" src="media/workout.mp4" playsinline preload="auto"></video></div></div>
     <div class="card"><h3>进度</h3>
       <div class="stats"><div><b id="sTotal">00:00</b><span>总用时</span></div><div><b id="sDone">0/20</b><span>已完成动作</span></div>
       <div><b id="sL">0</b><span>左腿有效次数</span></div><div><b id="sR">0</b><span>右腿有效次数</span></div></div></div>

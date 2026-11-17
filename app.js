@@ -7,7 +7,7 @@ const GROUP_REST = 120; // 每组结束后的中场休息(秒)
 // 示范画面(视频,可选/静音)与独立音频(bgm)一起按当前动作的片段同步;视频缺失也不影响声音
 ref.muted = true;
 let refOk = true;
-ref.addEventListener('error', () => { refOk = false; ref.closest('.card').style.display = 'none'; });
+ref.addEventListener('error', () => { refOk = false; ref.closest('.card').style.display = 'none'; document.body.classList.add('hideRef'); $('fsRef').style.display = 'none'; });
 const mSeek = t => { try { bgm.currentTime = t; } catch {} if (refOk) try { ref.currentTime = t; } catch {} };
 const mPause = () => { bgm.pause(); restAudio.pause(); if (refOk) ref.pause(); };
 const mPlay = () => {
@@ -46,12 +46,12 @@ let DATA, landmarker = null;
 const stage = document.querySelector('.stage');
 let nativeFS = false;
 function enterFS() {
-  stage.classList.add('full');
+  stage.classList.add('full'); syncFS();
   const req = stage.requestFullscreen || stage.webkitRequestFullscreen;
   if (req) { try { Promise.resolve(req.call(stage)).then(() => { nativeFS = true; }).catch(() => {}); } catch {} }
 }
 function exitFS() {
-  stage.classList.remove('full');
+  stage.classList.remove('full'); syncFS();
   const fe = document.fullscreenElement || document.webkitFullscreenElement;
   nativeFS = false;
   if (fe) { try { Promise.resolve((document.exitFullscreen || document.webkitExitFullscreen).call(document)).catch(() => {}); } catch {} }
@@ -59,7 +59,12 @@ function exitFS() {
 const onFSChange = () => { if (nativeFS && !(document.fullscreenElement || document.webkitFullscreenElement)) { nativeFS = false; stage.classList.remove('full'); syncFS(); } }; // 用户按 Esc 退出
 document.addEventListener('fullscreenchange', onFSChange);
 document.addEventListener('webkitfullscreenchange', onFSChange);
-$('fsExit').onclick = () => { if (stage.classList.contains('full')) { exitFS(); $('fsExit').textContent = '全屏'; } else { enterFS(); } };
+$('fsExit').onclick = () => { if (stage.classList.contains('full')) exitFS(); else enterFS(); };
+// 全屏时示范画面悬浮在左下角,可显示/隐藏(记住选择)
+try { if (localStorage.getItem('hideRef') === '1') document.body.classList.add('hideRef'); } catch {}
+const syncRef = () => { $('fsRef').textContent = document.body.classList.contains('hideRef') ? '显示示范' : '隐藏示范'; };
+$('fsRef').onclick = () => { document.body.classList.toggle('hideRef'); try { localStorage.setItem('hideRef', document.body.classList.contains('hideRef') ? '1' : '0'); } catch {} syncRef(); };
+syncRef();
 const syncFS = () => { $('fsPause').textContent = $('btnPause').textContent; $('fsExit').textContent = stage.classList.contains('full') ? '退出全屏' : '全屏'; };
 $('fsPause').onclick = () => { $('btnPause').click(); syncFS(); };
 $('fsSkip').onclick = () => $('btnSkip').click();
@@ -201,7 +206,7 @@ function endWorkout() {
     if (S.moveTime > 1 && S.moveTimes[idx()] === undefined) { S.moveTimes[idx()] = S.moveTime; S.moveReps[idx()] = S.rep; }
     if (S.imgs[S.g] === undefined) capture(S.g);
   }
-  S.phase = 'done'; mPause(); hideBig(); renderChips(); exitFS();
+  S.phase = 'done'; mPause(); hideBig(); renderChips(); exitFS(); stage.classList.remove('live');
   $('btnEnd').disabled = $('btnPause').disabled = $('btnSkip').disabled = true;
   showSavePrompt();
 }
@@ -369,6 +374,7 @@ $('btnStart').onclick = async () => {
     await cam.play();
     await ref.play().then(() => ref.pause()).catch(() => {});
     $('btnPause').disabled = $('btnSkip').disabled = $('btnEnd').disabled = false;
+    stage.classList.add('live'); syncFS();
     S.g = 0; S.m = 0; startRest();
   } catch (err) { exitFS(); setMsg('启动失败:' + err.message + '(请用 http://localhost:8080 打开并允许摄像头)', 'bad'); $('btnStart').disabled = false; console.error(err); }
 };
