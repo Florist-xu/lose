@@ -254,9 +254,10 @@ def parse_via_service(link):
     except (urllib.error.URLError, OSError, ValueError):
         raise ValueError('解析服务连不上,请确认 media-parser 已启动(PARSER_URL=' + PARSER_URL + ')')
     d = j.get('data') or {}
-    if not j.get('succ') or not d.get('audio_url'):
-        raise ValueError('解析失败:' + str(j.get('retdesc') or '没有拿到音频地址') + '。可改为保存视频后上传')
-    return d['audio_url'], (d.get('title') or '')[:60]
+    url = d.get('audio_url') or d.get('video_url')  # 部分视频没有独立音频,退而用视频(mp4 只播放声音)
+    if not j.get('succ') or not url:
+        raise ValueError('解析失败:' + ('这条链接没有解析到音频或视频(可能是图文/已失效)' if j.get('succ') else str(j.get('retdesc') or '未知原因')) + '。可改为保存视频后上传')
+    return url, (d.get('title') or '')[:60]
 
 
 def import_music_link(text):

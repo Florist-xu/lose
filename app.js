@@ -222,13 +222,14 @@ function buildPayload() {
   const t0 = S.startedAt ?? new Date();
   return { user: USER, workout: WID, workout_name: DATA.name, day: dayOf(t0), started_at: t0.toISOString(), duration_sec: Math.round(S.totalTime), active_sec: Math.round(S.active), moves_done: S.doneSet.size, moves, images };
 }
+function stopCam() { try { cam.srcObject?.getTracks().forEach(t => t.stop()); } catch {} cam.srcObject = null; draw(null); }
 function endWorkout() {
   if (S.phase === 'idle') return;
   if (S.phase === 'active') {
     if (S.moveTime > 1 && S.moveTimes[idx()] === undefined) { S.moveTimes[idx()] = S.moveTime; S.moveReps[idx()] = S.rep; }
     if (S.imgs[S.g] === undefined) capture(S.g);
   }
-  S.phase = 'done'; mPause(); hideBig(); renderChips(); exitFS(); stage.classList.remove('live'); document.body.classList.remove('training'); lock(false);
+  S.phase = 'done'; mPause(); stopCam(); hideBig(); renderChips(); exitFS(); stage.classList.remove('live'); document.body.classList.remove('training'); lock(false);
   $('btnEnd').disabled = $('btnPause').disabled = $('btnSkip').disabled = true;
   showSavePrompt();
 }
@@ -253,15 +254,26 @@ function showSavePrompt() {
     $('bAgain').onclick = () => location.reload(); $('bClose').onclick = closeModal;
   };
 }
+let relaxTimer = null, relaxUntil = 0;
+function startRelax() {
+  if (!tracks.length) return false;
+  relaxUntil = Date.now() + 180000; restAudio.muted = false;
+  restAudio.play().catch(() => {});
+  clearTimeout(relaxTimer); relaxTimer = setTimeout(stopRelax, 180000);
+  return true;
+}
+function stopRelax() { clearTimeout(relaxTimer); relaxUntil = 0; restAudio.pause(); }
 async function doSave(p) {
   if (S.saved) return;
   $('bSave').disabled = $('bDiscard').disabled = true; setNote('保存中…');
   try {
     const r = await fetch('api/sessions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p) });
     const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status));
-    S.saved = true;
+    S.saved = true; const relaxing = startRelax();
     openModal(`<h2>✅ 已保存</h2><div class="sub">今天累计 ${j.day_sessions} 次训练,共 ${fmtDur(j.day_total_sec)}。</div>
-      <div class="btns"><button id="bHist" class="pri">查看历史</button><button id="bAgain">重新开始</button></div>`, true);
+      ${relaxing ? '<div class="sub" id="relaxNote">🎵 摄像头已关闭,正在播放 3 分钟放松音乐</div>' : '<div class="sub">摄像头已关闭。(还没有休息音乐,可在「休息音乐」里添加,下次结束后会自动放松 3 分钟)</div>'}
+      <div class="btns"><button id="bHist" class="pri">查看历史</button>${relaxing ? '<button id="bStopRelax">⏸ 停止音乐</button>' : ''}<button id="bAgain">重新开始</button></div>`, true);
+    if ($('bStopRelax')) $('bStopRelax').onclick = () => { stopRelax(); $('bStopRelax').remove(); $('relaxNote').textContent = '放松音乐已停止'; };
     $('bHist').onclick = openHistory; $('bAgain').onclick = () => location.reload();
   } catch (e) {
     $('bSave').disabled = $('bDiscard').disabled = false;
@@ -417,6 +429,7 @@ $('btnStart').onclick = async () => {
   enterFS(); lock(true);
   try { actx ??= new AudioContext(); actx.resume(); } catch {}
   bgm.muted = true; { const up = bgm.play(); if (up) up.then(() => { bgm.pause(); bgm.muted = !$('sound').checked; }).catch(() => {}); } // 解锁音乐(iOS)
+  stopRelax();
   restAudio.muted = true; if (restAudio.getAttribute('src')) { const ru = restAudio.play(); if (ru) ru.then(() => { restAudio.pause(); restAudio.currentTime = 0; }).catch(() => {}); } // 解锁休息音乐(iOS)
   $('btnStart').disabled = true; setMsg('正在加载模型与摄像头…');
   try {
@@ -501,7 +514,7 @@ function playRestMusic() {
   restAudio.muted = false;
   restAudio.play().catch(() => setMsg('休息音乐被浏览器拦截,点一下"音乐"按钮开启', 'bad'));
 }
-restAudio.addEventListener('ended', async () => { await prepareRest(); if (S.phase === 'rest' && S.groupBreak && !S.paused) playRestMusic(); });
+restAudio.addEventListener('ended', async () => { await prepareRest(); if (S.phase === 'rest' && S.groupBreak && !S.paused) playRestMusic(); else if (Date.now() < relaxUntil) restAudio.play().catch(() => {}); });
 $('bSkipRest').onclick = () => { if (S.phase === 'rest') S.restLeft = 0; };
 $('bPauseMusic').onclick = () => { if (restAudio.paused) playRestMusic(); else restAudio.pause(); $('bPauseMusic').textContent = restAudio.paused ? '▶ 音乐' : '⏸ 音乐'; };
 $('bNextTrack').onclick = async () => { await prepareRest(true); playRestMusic(); $('bPauseMusic').textContent = '⏸ 音乐'; };
@@ -514,7 +527,7 @@ async function openMusic() {
   openModal(`<h2>休息音乐</h2><div class="sub">每组结束后会中场休息 2 分钟,期间播放这里选中的音乐。</div>
     <div class="btns" style="margin-top:6px"><button id="mUpload" class="pri">上传音频/视频文件</button></div>
     <input id="mFile" type="file" accept=".mp3,.m4a,.aac,.wav,.ogg,.flac,.mp4,audio/*,video/mp4" style="display:none">
-    <div style="display:flex;gap:8px;margin-top:10px"><input id="mLink" placeholder="粘贴音频直链(以 http 开头的 mp3/m4a 文件地址)" style="flex:1;min-width:0;padding:9px;border-radius:8px;border:1px solid var(--line);background:#0003;color:var(--fg)"><button id="mImport">导入</button></div>
+    <div style="display:flex;gap:8px;margin-top:10px"><div style="position:relative;flex:1;min-width:0"><input id="mLink" placeholder="粘贴音频直链(以 http 开头的 mp3/m4a 文件地址)" style="width:100%;box-sizing:border-box;padding:9px 34px 9px 9px;border-radius:8px;border:1px solid var(--line);background:#0003;color:var(--fg)"><button id="mClear" type="button" aria-label="清空" style="display:none;position:absolute;right:4px;top:50%;transform:translateY(-50%);width:28px;height:28px;padding:0;border-radius:50%;line-height:1">✕</button></div><button id="mImport">导入</button></div>
     <div class="note" style="color:var(--mut)">可直接粘贴抖音分享文字/链接(需服务器已配置 PARSER_URL 并启动 media-parser,见 README);未配置时请在抖音里「保存视频」,再点上方上传该文件(mp4 也行,只播放声音)。</div>
     <div id="note" class="note"></div>
     <div style="margin:12px 0 6px;font-size:13px;color:var(--mut)">播放方式</div>
@@ -523,6 +536,8 @@ async function openMusic() {
     <div class="btns"><button id="bClose">完成</button></div>`, true);
   $('bClose').onclick = () => { restAudio.pause(); closeModal(); prepareRest(); };
   mbox.querySelectorAll('input[name=rm]').forEach(r => r.onchange = () => { try { localStorage.setItem('restMusic', r.value); } catch {} });
+  const lk = $('mLink'), syncClr = () => { $('mClear').style.display = lk.value ? 'block' : 'none'; };
+  lk.oninput = syncClr; $('mClear').onclick = () => { lk.value = ''; syncClr(); setNote(''); lk.focus(); };
   $('mUpload').onclick = () => $('mFile').click();
   $('mFile').onchange = async e => {
     const f = e.target.files[0]; if (!f) return;
