@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>跟练打卡 · 5组动作识别</title>
 <style>
-:root{--bg:#10141c;--card:#1a2130;--fg:#eef2f8;--mut:#8b97ab;--ac:#ffd23f;--ok:#3ddc84;--bad:#ff6b6b;--line:#2a3447}
+:root{color-scheme:dark;--bg:#10141c;--card:#1a2130;--fg:#eef2f8;--mut:#8b97ab;--ac:#ffd23f;--ok:#3ddc84;--bad:#ff6b6b;--line:#2a3447}
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--fg);font-family:system-ui,"Microsoft YaHei",sans-serif}
 header{display:flex;flex-direction:column;gap:8px;padding:10px 14px;border-bottom:1px solid var(--line)}
@@ -26,7 +26,10 @@ header.opt-open #btnSet{border-color:var(--ac)}
 .hrow.ctl button.pri{padding:13px 8px;font-size:16px}
 body:not(.training) .hrow.ctl button:not(#btnStart){display:none}
 body.training #btnStart{display:none}
-select,input[type=text]{background:#0003;color:var(--fg);border:1px solid var(--line);border-radius:8px;padding:6px 8px;font-size:14px}
+select,input[type=text]{background:#0003;color:var(--fg);border:1px solid var(--line);border-radius:8px;padding:6px 8px;font-size:14px;color-scheme:dark}
+select{appearance:none;-webkit-appearance:none;padding-right:28px;background:#0003 url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' fill='none' stroke='%238b97ab' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat right 10px center;cursor:pointer}
+select:focus,input[type=text]:focus{outline:none;border-color:var(--ac)}
+option{background:#1a2130;color:#eef2f8}
 @media(min-width:760px){
   header{flex-direction:row;flex-wrap:wrap;align-items:center;gap:10px 14px;padding:10px 16px}
   .hrow{display:contents}
