@@ -69,6 +69,9 @@ def init_db():
         if 'workout' not in cols:   # 多运动项目:旧记录都属于第一个项目 fatburn
             c.execute("ALTER TABLE sessions ADD COLUMN workout TEXT NOT NULL DEFAULT 'fatburn'")
             c.execute("ALTER TABLE sessions ADD COLUMN workout_name TEXT NOT NULL DEFAULT '燃脂跟练'")
+        if 'username' not in cols:  # 用户:只凭用户名区分(无密码);之前的全部记录归 florist
+            c.execute("ALTER TABLE sessions ADD COLUMN username TEXT NOT NULL DEFAULT 'florist'")
+        c.execute('CREATE INDEX IF NOT EXISTS idx_sessions_user_day ON sessions(username, day)')
 
 
 def clamp_int(v, lo, hi, name):
@@ -88,6 +91,7 @@ def save_session(body):
     dur = clamp_int(body.get('duration_sec'), 0, 86400, 'duration_sec')
     act = clamp_int(body.get('active_sec'), 0, 86400, 'active_sec')
     done = clamp_int(body.get('moves_done'), 0, 200, 'moves_done')
+    user = clean_user(body.get('user'))
     wid = str(body.get('workout', 'fatburn'))
     if not WID_RE.match(wid):
         raise ValueError('workout 不合法')
@@ -115,15 +119,30 @@ def save_session(body):
             raise ValueError('图片无效或过大')
         imgs.append((g, mi, raw))
     with db() as c:
-        cur = c.execute('INSERT INTO sessions(day,started_at,duration_sec,active_sec,moves_done,moves_json,workout,workout_name) VALUES(?,?,?,?,?,?,?,?)',
-                        (day, started, dur, act, done, json.dumps(clean_moves), wid, wname))
+        user = canon_user(c, user)
+        cur = c.execute('INSERT INTO sessions(day,started_at,duration_sec,active_sec,moves_done,moves_json,workout,workout_name,username) VALUES(?,?,?,?,?,?,?,?,?)',
+                        (day, started, dur, act, done, json.dumps(clean_moves), wid, wname, user))
         sid = cur.lastrowid
         c.executemany('INSERT INTO images(session_id,grp,move_idx,data) VALUES(?,?,?,?)', [(sid, g, mi, raw) for g, mi, raw in imgs])
-        t = c.execute('SELECT COALESCE(SUM(duration_sec),0) s, COUNT(*) n FROM sessions WHERE day=?', (day,)).fetchone()
+        t = c.execute('SELECT COALESCE(SUM(duration_sec),0) s, COUNT(*) n FROM sessions WHERE day=? AND username=? COLLATE NOCASE', (day, user)).fetchone()
     return {'id': sid, 'day_total_sec': t['s'], 'day_sessions': t['n']}
 
 
 WID_RE = re.compile(r'^[A-Za-z0-9_-]{1,40}$')
+USER_RE = re.compile(r'^[\w.\-]{1,20}$')   # 字母/数字/汉字/下划线/点/横线,1~20 个字符
+
+
+def clean_user(v):
+    v = str(v or '').strip()
+    if not USER_RE.match(v):
+        raise ValueError('用户名只能包含字母、数字、汉字、_ . -,长度 1~20')
+    return v
+
+
+def canon_user(c, name):
+    """用户名不区分大小写:已存在则沿用已有写法"""
+    r = c.execute('SELECT username FROM sessions WHERE username=? COLLATE NOCASE LIMIT 1', (name,)).fetchone()
+    return r['username'] if r else name
 
 
 def list_workouts():
@@ -144,16 +163,21 @@ def list_workouts():
     return out
 
 
-def list_days():
+def list_days(user):
     with db() as c:
         return [dict(r) for r in c.execute(
-            'SELECT day, SUM(duration_sec) total_sec, SUM(active_sec) active_sec, COUNT(*) sessions FROM sessions GROUP BY day ORDER BY day DESC LIMIT 400')]
+            'SELECT day, SUM(duration_sec) total_sec, SUM(active_sec) active_sec, COUNT(*) sessions FROM sessions WHERE username=? COLLATE NOCASE GROUP BY day ORDER BY day DESC LIMIT 400', (user,))]
 
 
-def list_sessions(day):
+def list_users():
+    with db() as c:
+        return [dict(r) for r in c.execute('SELECT username name, COUNT(*) sessions, MAX(day) last_day FROM sessions GROUP BY username COLLATE NOCASE ORDER BY MAX(id) DESC LIMIT 50')]
+
+
+def list_sessions(day, user):
     with db() as c:
         out = []
-        for r in c.execute('SELECT * FROM sessions WHERE day=? ORDER BY id DESC', (day,)):
+        for r in c.execute('SELECT * FROM sessions WHERE day=? AND username=? COLLATE NOCASE ORDER BY id DESC', (day, user)):
             d = dict(r)
             d['moves'] = json.loads(d.pop('moves_json'))
             d['images'] = [dict(i) for i in c.execute('SELECT id, grp, move_idx FROM images WHERE session_id=? ORDER BY grp', (r['id'],))]
@@ -313,13 +337,15 @@ class H(SimpleHTTPRequestHandler):
         u = urlparse(self.path)
         parts = [p for p in u.path.split('/') if p]  # ['api', ...]
         try:
+            if method == 'GET' and parts == ['api', 'users']:
+                return self._json(list_users())
             if method == 'GET' and parts == ['api', 'days']:
-                return self._json(list_days())
+                return self._json(list_days(clean_user(parse_qs(u.query).get('user', [''])[0])))
             if method == 'GET' and parts == ['api', 'sessions']:
                 day = parse_qs(u.query).get('day', [''])[0]
                 if not DAY_RE.match(day):
                     return self._json({'error': 'day 参数不合法'}, 400)
-                return self._json(list_sessions(day))
+                return self._json(list_sessions(day, clean_user(parse_qs(u.query).get('user', [''])[0])))
             if method == 'GET' and len(parts) == 3 and parts[1] == 'images' and parts[2].isdigit():
                 with db() as c:
                     r = c.execute('SELECT data FROM images WHERE id=?', (int(parts[2]),)).fetchone()
@@ -344,7 +370,7 @@ class H(SimpleHTTPRequestHandler):
                 return self._json(save_session(body), 201)
             if method == 'DELETE' and len(parts) == 3 and parts[1] == 'sessions' and parts[2].isdigit():
                 with db() as c:
-                    cur = c.execute('DELETE FROM sessions WHERE id=?', (int(parts[2]),))
+                    cur = c.execute('DELETE FROM sessions WHERE id=? AND username=? COLLATE NOCASE', (int(parts[2]), clean_user(parse_qs(u.query).get('user', [''])[0])))
                 return self._json({'deleted': cur.rowcount})
             if method == 'GET' and parts == ['api', 'workouts']:
                 return self._json(list_workouts())

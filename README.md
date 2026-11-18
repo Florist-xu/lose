@@ -43,6 +43,12 @@ sh start.sh
   未配置 `PARSER_URL` 时,请在抖音里"保存视频"到手机,再用"上传"选择该文件。解析依赖平台接口,随时可能失效。
 - 音乐文件保存在 `data/music/`(不会上传到 GitHub,避免版权问题),列表存在 SQLite 的 `music` 表。
 
+## 用户
+- 首次打开会弹出登录框,**只需输入用户名**(字母/数字/汉字/_ . -,1~20 个字符,不区分大小写),无需密码;右上角"👤 用户名"可切换用户。
+- 训练记录、历史记录按用户名分开保存。升级前已有的全部记录自动归到用户 **florist**。
+- 休息音乐是所有用户共用的。
+- ⚠️ 没有密码,只适合自己的手机/家庭局域网;知道用户名的人就能看到那个用户的记录。
+
 ## 训练记录
 - 点"结束训练"或 5 组全部完成后,会弹出保存提示:**保存记录 / 放弃保存**。
 - 记录内容:日期、总用时(含休息)、动作用时、完成动作数、每个动作的次数与用时、每组随机抓拍的一张图。
@@ -54,11 +60,12 @@ sh start.sh
 ### 接口(供参考)
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| POST | `/api/sessions` | 保存一次训练(含 base64 JPEG 图片) |
-| GET | `/api/days` | 按天汇总 |
-| GET | `/api/sessions?day=YYYY-MM-DD` | 某天的训练列表 |
+| POST | `/api/sessions` | 保存一次训练(含 `user`、base64 JPEG 图片) |
+| GET | `/api/users` | 已有用户列表 |
+| GET | `/api/days?user=名字` | 按天汇总 |
+| GET | `/api/sessions?day=YYYY-MM-DD&user=名字` | 某天的训练列表 |
 | GET | `/api/images/<id>` | 图片 |
-| DELETE | `/api/sessions/<id>` | 删除一条(连同图片) |
+| DELETE | `/api/sessions/<id>?user=名字` | 删除一条(连同图片,只能删自己的) |
 | GET / PUT | `/api/music` | 音乐列表 / 上传(原始文件作为请求体,`?name=文件名`) |
 | POST | `/api/music/link` | 导入音频直链 `{url}`(禁止访问内网地址) |
 | DELETE | `/api/music/<id>` | 删除音乐 |

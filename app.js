@@ -7,7 +7,7 @@ const cam = $('cam'), overlay = $('overlay'), ctx = overlay.getContext('2d'), re
 // 示范画面(视频,可选/静音)与独立音频(bgm)一起按当前动作的片段同步;视频缺失也不影响声音
 ref.muted = true;
 let refOk = true;
-ref.addEventListener('error', () => { refOk = false; ref.closest('.card').style.display = 'none'; document.body.classList.add('hideRef'); $('fsRef').style.display = 'none'; });
+ref.addEventListener('error', () => { refOk = false; $('refCard').style.display = 'none'; document.body.classList.add('hideRef'); $('fsRef').style.display = 'none'; });
 const mSeek = t => { try { bgm.currentTime = t; } catch {} if (refOk) try { ref.currentTime = t; } catch {} };
 const mPause = () => { bgm.pause(); restAudio.pause(); if (refOk) ref.pause(); };
 const mPlay = () => {
@@ -41,7 +41,7 @@ async function init() {
   DATA = await (await fetch(base + 'workout.json')).json();
   DATA.groups ??= 1; DATA.movesPerGroup ??= DATA.templates.length; DATA.groupRestSec ??= 120; DATA.restSec ??= 10;
   document.title = `${DATA.name} · 跟练打卡`;
-  $('title').textContent = `🏋️ ${DATA.name} · ${NG()}组 × ${NM()}动作 × ${DATA.reps}次`;
+  $('title').innerHTML = `🏋️ ${esc(DATA.name)} <small>· ${NG()}组 × ${NM()}动作 × ${DATA.reps}次</small>`;
   $('cntMax').textContent = '/' + DATA.reps; $('sDone').textContent = `0/${NMOV()}`;
   if (DATA.counter && DATA.counter !== 'kneeLift') { setMsg(`「${DATA.name}」需要的识别方式(${DATA.counter})暂未支持`, 'bad'); btn.textContent = label; return; }
   ref.src = base + (DATA.video || 'workout.mp4');
@@ -218,7 +218,7 @@ function buildPayload() {
   S.moveTimes.forEach((sec, i) => { if (sec !== undefined) moves.push({ idx: i, reps: S.moveReps[i] ?? 0, sec: Math.round(sec) }); });
   const images = Object.entries(S.imgs).map(([g, v]) => ({ group: +g, move_idx: v.move_idx, data: v.data }));
   const t0 = S.startedAt ?? new Date();
-  return { workout: WID, workout_name: DATA.name, day: dayOf(t0), started_at: t0.toISOString(), duration_sec: Math.round(S.totalTime), active_sec: Math.round(S.active), moves_done: S.doneSet.size, moves, images };
+  return { user: USER, workout: WID, workout_name: DATA.name, day: dayOf(t0), started_at: t0.toISOString(), duration_sec: Math.round(S.totalTime), active_sec: Math.round(S.active), moves_done: S.doneSet.size, moves, images };
 }
 function endWorkout() {
   if (S.phase === 'idle') return;
@@ -226,7 +226,7 @@ function endWorkout() {
     if (S.moveTime > 1 && S.moveTimes[idx()] === undefined) { S.moveTimes[idx()] = S.moveTime; S.moveReps[idx()] = S.rep; }
     if (S.imgs[S.g] === undefined) capture(S.g);
   }
-  S.phase = 'done'; mPause(); hideBig(); renderChips(); exitFS(); stage.classList.remove('live'); $('wsel').disabled = false;
+  S.phase = 'done'; mPause(); hideBig(); renderChips(); exitFS(); stage.classList.remove('live'); document.body.classList.remove('training'); lock(false);
   $('btnEnd').disabled = $('btnPause').disabled = $('btnSkip').disabled = true;
   showSavePrompt();
 }
@@ -269,10 +269,10 @@ async function doSave(p) {
 async function openHistory() {
   openModal('<h2>历史记录</h2><div class="sub">加载中…</div>', true);
   try {
-    const days = await (await fetch('api/days')).json();
+    const days = await (await fetch('api/days?user=' + encodeURIComponent(USER))).json();
     if (!Array.isArray(days)) throw new Error(days.error || '返回格式错误');
     const rows = days.map(d => `<div class="dayrow" data-day="${esc(d.day)}"><span>${esc(d.day)}</span><span>${d.sessions} 次 · ${fmtDur(d.total_sec)}</span></div>`).join('');
-    openModal(`<h2>历史记录</h2><div class="sub">按天汇总的锻炼时长,点击查看详情</div>${rows || '<div class="sub">还没有记录</div>'}<div class="btns"><button id="bClose">关闭</button></div>`, true);
+    openModal(`<h2>历史记录 · ${esc(USER)}</h2><div class="sub">按天汇总的锻炼时长,点击查看详情</div>${rows || '<div class="sub">还没有记录</div>'}<div class="btns"><button id="bClose">关闭</button></div>`, true);
     $('bClose').onclick = closeModal;
     mbox.querySelectorAll('.dayrow').forEach(el => el.onclick = () => openDay(el.dataset.day));
   } catch (e) {
@@ -282,7 +282,7 @@ async function openHistory() {
 }
 async function openDay(day) {
   try {
-    const list = await (await fetch('api/sessions?day=' + encodeURIComponent(day))).json();
+    const list = await (await fetch('api/sessions?day=' + encodeURIComponent(day) + '&user=' + encodeURIComponent(USER))).json();
     const html = list.map(s => `<div class="sess"><b>${esc(new Date(s.started_at).toLocaleTimeString())}</b> · 总用时 ${fmtDur(s.duration_sec)} · 动作用时 ${fmtDur(s.active_sec)} · ${esc(s.workout_name || '')} · 完成 ${s.moves_done} 个动作
       <div class="thumbs">${s.images.map(i => `<figure><img loading="lazy" src="api/images/${i.id}" alt="">第${i.grp + 1}组</figure>`).join('')}</div>
       <button data-del="${s.id}" class="danger">删除这条</button></div>`).join('');
@@ -290,7 +290,7 @@ async function openDay(day) {
     $('bBack').onclick = openHistory; $('bClose').onclick = closeModal;
     mbox.querySelectorAll('[data-del]').forEach(b => b.onclick = async () => {
       if (!confirm('确定删除这条记录(含图片)吗?')) return;
-      await fetch('api/sessions/' + b.dataset.del, { method: 'DELETE' }); openDay(day);
+      await fetch('api/sessions/' + b.dataset.del + '?user=' + encodeURIComponent(USER), { method: 'DELETE' }); openDay(day);
     });
   } catch (e) {
     openModal(`<div class="note bad">加载失败:${esc(e.message)}</div><div class="btns"><button id="bBack">返回</button></div>`, true);
@@ -380,7 +380,8 @@ $('btnPause').onclick = () => {
 addEventListener('keydown', e => { if (e.key === 'n') $('btnSkip').click(); if (e.key === ' ') { e.preventDefault(); $('btnPause').click(); } });
 
 $('btnStart').onclick = async () => {
-  enterFS(); $('wsel').disabled = true;
+  if (!USER) { showLogin(false); return; }
+  enterFS(); lock(true);
   try { actx ??= new AudioContext(); actx.resume(); } catch {}
   bgm.muted = true; { const up = bgm.play(); if (up) up.then(() => { bgm.pause(); bgm.muted = !$('sound').checked; }).catch(() => {}); } // 解锁音乐(iOS)
   restAudio.muted = true; if (restAudio.getAttribute('src')) { const ru = restAudio.play(); if (ru) ru.then(() => { restAudio.pause(); restAudio.currentTime = 0; }).catch(() => {}); } // 解锁休息音乐(iOS)
@@ -395,10 +396,37 @@ $('btnStart').onclick = async () => {
     await cam.play();
     await ref.play().then(() => ref.pause()).catch(() => {});
     $('btnPause').disabled = $('btnSkip').disabled = $('btnEnd').disabled = false;
-    stage.classList.add('live'); syncFS();
+    stage.classList.add('live'); document.body.classList.add('training'); syncFS();
     S.g = 0; S.m = 0; startRest();
-  } catch (err) { exitFS(); $('wsel').disabled = false; setMsg('启动失败:' + err.message + '(请用 http://localhost:8080 打开并允许摄像头)', 'bad'); $('btnStart').disabled = false; console.error(err); }
+  } catch (err) { exitFS(); lock(false); setMsg('启动失败:' + err.message + '(请用 http://localhost:8080 打开并允许摄像头)', 'bad'); $('btnStart').disabled = false; console.error(err); }
 };
+
+// ---------- 用户(只凭用户名区分,无密码) ----------
+let USER = ''; try { USER = localStorage.getItem('user') || ''; } catch {}
+const USER_RE = /^[\w.\-\u4e00-\u9fa5]{1,20}$/;
+const showUser = () => { $('btnUser').textContent = USER ? '👤 ' + USER : '👤 登录'; };
+const lock = on => { $('wsel').disabled = on; $('btnUser').disabled = on; };
+async function showLogin(canCancel) {
+  let users = []; try { users = await (await fetch('api/users')).json(); } catch {}
+  openModal(`<h2>👤 ${USER ? '切换用户' : '登录'}</h2><div class="sub">输入用户名即可,无需密码。训练记录按用户名分开保存。</div>
+    <input type="text" id="uName" maxlength="20" placeholder="用户名(字母/数字/汉字)" autocomplete="off" autocapitalize="off" value="${esc(USER)}">
+    ${users.length ? `<div class="sub" style="margin-top:12px">已有用户,点一下直接进入</div><div class="ulist">${users.map(u => `<button data-u="${esc(u.name)}">${esc(u.name)}</button>`).join('')}</div>` : ''}
+    <div class="btns"><button id="uGo" class="pri">进入</button>${canCancel ? '<button id="uCancel">取消</button>' : ''}</div><div id="note" class="note"></div>`, false);
+  const go = name => {
+    name = (name ?? $('uName').value).trim();
+    if (!USER_RE.test(name)) { setNote('用户名只能包含字母、数字、汉字、_ . -,长度 1~20', 'bad'); return; }
+    USER = (users.find(u => u.name.toLowerCase() === name.toLowerCase()) || { name }).name;
+    try { localStorage.setItem('user', USER); } catch {}
+    showUser(); closeModal();
+  };
+  $('uGo').onclick = () => go();
+  $('uName').onkeydown = e => { if (e.key === 'Enter') go(); };
+  mbox.querySelectorAll('[data-u]').forEach(b => b.onclick = () => go(b.dataset.u));
+  if ($('uCancel')) $('uCancel').onclick = closeModal;
+  if (!USER) setTimeout(() => $('uName').focus(), 50);
+}
+$('btnUser').onclick = () => showLogin(!!USER);
+showUser();
 
 // ---------- 休息音乐(用户上传 / 导入) ----------
 let tracks = [], lastTrackId = null;
@@ -491,4 +519,5 @@ async function openMusic() {
 }
 $('btnMusic').onclick = openMusic;
 init();
+if (!USER) showLogin(false);
 requestAnimationFrame(loop);

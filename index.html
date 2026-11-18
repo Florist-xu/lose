@@ -8,8 +8,29 @@
 :root{--bg:#10141c;--card:#1a2130;--fg:#eef2f8;--mut:#8b97ab;--ac:#ffd23f;--ok:#3ddc84;--bad:#ff6b6b;--line:#2a3447}
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--fg);font-family:system-ui,"Microsoft YaHei",sans-serif}
-header{display:flex;align-items:center;gap:12px;padding:10px 16px;border-bottom:1px solid var(--line);flex-wrap:wrap}
-header h1{font-size:18px;margin:0;flex:1;min-width:160px}
+header{display:flex;flex-direction:column;gap:8px;padding:10px 14px;border-bottom:1px solid var(--line)}
+.hrow{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.hrow.top{flex-wrap:nowrap;justify-content:space-between}
+@media(max-width:600px){header h1 small{display:none}}
+header h1 small{font-size:13px;color:var(--mut);font-weight:500}
+header h1{font-size:17px;margin:0;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#btnUser{flex:none;max-width:46%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:6px 12px;border-radius:999px}
+.hrow label.sel{flex:1;min-width:0}.hrow label.sel select{flex:1;min-width:0}
+.pill{padding:6px 12px;border:1px solid var(--line);border-radius:999px;background:var(--card);color:var(--fg)}
+.pill small{color:var(--mut)}
+.hrow.acts button,.hrow.ctl button{flex:1;padding:10px 8px}
+.hrow.ctl button.pri{padding:13px 8px;font-size:16px}
+body:not(.training) .hrow.ctl button:not(#btnStart){display:none}
+body.training #btnStart{display:none}
+select,input[type=text]{background:#0003;color:var(--fg);border:1px solid var(--line);border-radius:8px;padding:6px 8px;font-size:14px}
+@media(min-width:760px){
+  header{flex-direction:row;flex-wrap:wrap;align-items:center;gap:10px 14px;padding:10px 16px}
+  .hrow{display:contents}
+  header h1{flex:1;min-width:200px;max-width:none;overflow:visible}
+  #btnUser{max-width:none}
+  .hrow label.sel{flex:none}.hrow label.sel select{flex:none}
+  .hrow.acts button,.hrow.ctl button,.hrow.ctl button.pri{flex:none;padding:8px 14px;font-size:14px}
+}
 button{background:var(--card);color:var(--fg);border:1px solid var(--line);border-radius:8px;padding:8px 14px;font-size:14px;cursor:pointer}
 button:hover{border-color:var(--ac)}button.pri{background:var(--ac);color:#111;border-color:var(--ac);font-weight:700}
 main{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:14px;padding:14px;max-width:1280px;margin:0 auto}
@@ -43,12 +64,16 @@ body:has(.stage.full){overflow:hidden}
 .stage.full video,.stage.full canvas{object-fit:contain}
 .stage.full .fsbar,.stage.live .fsbar{display:flex}
 .stage.live:not(.full) .fsbar{top:74px;bottom:auto;left:16px;right:auto;justify-content:flex-start}
-.stage.live:not(.full) .fsbar button:not(#fsExit){display:none}
-body:has(.stage.full) #refCard{position:fixed;z-index:45;left:calc(12px + env(safe-area-inset-left));bottom:calc(64px + env(safe-area-inset-bottom));width:96px;padding:0;border:2px solid var(--ac);background:#000;border-radius:8px;overflow:hidden;pointer-events:none;box-shadow:0 2px 10px #000a}
-body:has(.stage.full) #refCard h3{display:none}
-body:has(.stage.full) #refCard .ref{max-height:none;border-radius:0}
-body.hideRef:has(.stage.full) #refCard{display:none}
+.stage.live:not(.full) .fsbar button:not(#fsExit):not(#fsRef){display:none}
+#refCard{position:absolute;z-index:3;left:10px;bottom:10px;width:72px;border:2px solid var(--ac);background:#000;border-radius:8px;overflow:hidden;pointer-events:none;box-shadow:0 2px 10px #000a}
+#refCard .ref{aspect-ratio:9/16;max-height:none;margin:0;border-radius:0}
+.stage #refCard video{position:static;inset:auto;width:100%;height:100%;object-fit:contain}
+body.hideRef #refCard{display:none}
+body:not(.hideRef) .stage .msg{left:92px;max-width:calc(100% - 92px - 118px)}
+.stage.full #refCard{left:calc(12px + env(safe-area-inset-left));bottom:calc(64px + env(safe-area-inset-bottom));width:96px}
 body:not(.hideRef) .stage.full .msg{left:calc(122px + env(safe-area-inset-left));max-width:calc(100% - 270px)}
+.ulist{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0}.ulist button{border-radius:999px;padding:6px 14px}
+.mbox input[type=text]{width:100%;padding:12px;font-size:16px;margin-top:8px}
 .stage.full .hud{padding:calc(12px + env(safe-area-inset-top)) calc(16px + env(safe-area-inset-right)) 12px calc(16px + env(safe-area-inset-left))}
 .stage.full .count{bottom:calc(64px + env(safe-area-inset-bottom));right:calc(16px + env(safe-area-inset-right))}
 .stage.full .msg{bottom:calc(64px + env(safe-area-inset-bottom));left:calc(16px + env(safe-area-inset-left))}
@@ -70,28 +95,30 @@ body:not(.hideRef) .stage.full .msg{left:calc(122px + env(safe-area-inset-left))
 </head>
 <body>
 <header>
-  <h1 id="title">🏋️ 跟练打卡</h1>
-  <label>项目<select id="wsel"></select></label>
-  <label><input type="checkbox" id="mirror" checked>镜像</label>
-  <label><input type="checkbox" id="sound" checked>音乐 <span id="bgmState"></span></label>
-  <label>识别<select id="sens"><option value="1.4">严格</option><option value="1.8" selected>标准</option><option value="2.6">宽松</option></select></label>
-  <label><input type="checkbox" id="debug">调试</label>
-  <button id="btnMusic">休息音乐</button>
-  <button id="btnHistory">历史记录</button>
-  <button id="btnEnd" disabled>结束训练</button>
-  <button id="btnPause" disabled>暂停</button>
-  <button id="btnSkip" disabled>跳过本动作</button>
-  <button class="pri" id="btnStart">开启摄像头并开始</button>
+  <div class="hrow top"><h1 id="title">🏋️ 跟练打卡</h1><button id="btnUser" title="切换用户">👤 登录</button></div>
+  <div class="hrow opts"><label class="sel">项目<select id="wsel"></select></label>
+    <label class="sel">识别<select id="sens"><option value="1.4">严格</option><option value="1.8" selected>标准</option><option value="2.6">宽松</option></select></label></div>
+  <div class="hrow tog">
+    <label class="pill"><input type="checkbox" id="mirror" checked>镜像</label>
+    <label class="pill"><input type="checkbox" id="sound" checked>音乐 <small id="bgmState"></small></label>
+    <label class="pill"><input type="checkbox" id="debug">调试</label>
+  </div>
+  <div class="hrow acts"><button id="btnMusic">🎵 休息音乐</button><button id="btnHistory">📅 历史记录</button></div>
+  <div class="hrow ctl">
+    <button class="pri" id="btnStart">开启摄像头并开始</button>
+    <button id="btnPause" disabled>暂停</button><button id="btnSkip" disabled>跳过本动作</button><button id="btnEnd" disabled>结束训练</button>
+  </div>
 </header>
 <main>
   <section>
     <div class="stage">
       <video id="cam" playsinline muted class="mirror"></video>
       <canvas id="overlay" class="mirror"></canvas>
+      <div id="refCard"><div class="ref"><video id="ref" playsinline preload="auto"></video></div></div>
       <div class="hud"><div><div class="t" id="hGroup">第一组</div><div class="n" id="hMove">胯下击掌</div></div>
         <div style="text-align:right"><div class="t">本动作用时</div><div class="n" id="hTimer">00:00</div></div></div>
       <div class="count"><span id="cnt">0</span><small id="cntMax">/20</small></div>
-      <div class="msg" id="msg">点击右上角"开启摄像头并开始"</div>
+      <div class="msg" id="msg">点击上方"开启摄像头并开始"</div>
       <div class="fsbar"><button id="fsRef">隐藏示范</button><button id="fsPause">暂停</button><button id="fsSkip">跳过</button><button id="fsEnd">结束</button><button id="fsExit">退出全屏</button></div>
       <div class="big" id="big"><div class="h" id="bigH"></div><div class="cd" id="bigCd"></div><div class="s" id="bigS"></div>
         <div class="bigBtns" id="bigBtns" style="display:none"><button id="bSkipRest" class="pri">跳过休息</button><button id="bPauseMusic">⏸ 音乐</button><button id="bNextTrack">下一首</button></div></div>
@@ -99,7 +126,6 @@ body:not(.hideRef) .stage.full .msg{left:calc(122px + env(safe-area-inset-left))
     <div class="card dbg" id="dbgBox" style="margin-top:12px;display:none"></div>
   </section>
   <aside>
-    <div class="card" id="refCard"><h3>示范画面(声音由独立音频播放)</h3><div class="ref"><video id="ref" playsinline preload="auto"></video></div></div>
     <div class="card"><h3>进度</h3>
       <div class="stats"><div><b id="sTotal">00:00</b><span>总用时</span></div><div><b id="sDone">0/0</b><span>已完成动作</span></div>
       <div><b id="sL">0</b><span>左腿有效次数</span></div><div><b id="sR">0</b><span>右腿有效次数</span></div></div></div>
