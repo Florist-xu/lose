@@ -22,7 +22,7 @@ const mPlay = () => {
 // 音乐文件改用 fetch 下载成 blob 再播放:iPhone/Safari 对"自签名 HTTPS"页面,
 // <audio src> 直连会加载失败,而 fetch 会沿用页面已信任的证书。加载状态显示在页头。
 const bgmState = t => { const e = $('bgmState'); if (e) e.textContent = t; };
-let bgmReady = false, DATA, WID, landmarker = null;
+let HOLD = false, bgmReady = false, DATA, WID, landmarker = null;
 const NG = () => DATA.groups, NM = () => DATA.movesPerGroup, NMOV = () => DATA.groups * DATA.movesPerGroup;
 
 // ---------- 运动项目:workouts/<id>/workout.json + 同目录的音频/示范视频 ----------
@@ -41,9 +41,11 @@ async function init() {
   DATA = await (await fetch(base + 'workout.json')).json();
   DATA.groups ??= 1; DATA.movesPerGroup ??= DATA.templates.length; DATA.groupRestSec ??= 120; DATA.restSec ??= 10;
   document.title = `${DATA.name} · 跟练打卡`;
-  $('title').innerHTML = `🏋️ ${esc(DATA.name)} <small>· ${NG()}组 × ${NM()}动作 × ${DATA.reps}次</small>`;
+  $('title').innerHTML = `🏋️ ${esc(DATA.name)} <small>· ${NG()}组 × ${NM()}动作 × ${DATA.reps}${DATA.unit || '次'}</small>`;
   $('cntMax').textContent = '/' + DATA.reps; $('sDone').textContent = `0/${NMOV()}`;
-  if (DATA.counter && DATA.counter !== 'kneeLift') { setMsg(`「${DATA.name}」需要的识别方式(${DATA.counter})暂未支持`, 'bad'); btn.textContent = label; return; }
+  HOLD = DATA.counter === 'hold';
+  document.querySelectorAll('#sL,#sR').forEach(e => e.parentElement.style.display = HOLD ? 'none' : '');
+  if (DATA.counter && !['kneeLift', 'hold'].includes(DATA.counter)) { setMsg(`「${DATA.name}」需要的识别方式(${DATA.counter})暂未支持`, 'bad'); btn.textContent = label; return; }
   ref.src = base + (DATA.video || 'workout.mp4');
   const au = base + (DATA.audio || 'workout.m4a');
   renderChips(); renderHud();
@@ -160,7 +162,7 @@ function renderHud() {
 }
 
 // ---------- 流程 ----------
-function resetCount() { S.rep = 0; S.flags = { L: false, R: false }; S.sideCnt = { L: 0, R: 0 }; S.moveTime = 0; S.lifts = { L: mkLift(), R: mkLift() }; }
+function resetCount() { S.rep = 0; S.holdAcc = 0; S.good = false; S.flags = { L: false, R: false }; S.sideCnt = { L: 0, R: 0 }; S.moveTime = 0; S.lifts = { L: mkLift(), R: mkLift() }; }
 function startRest(sec = DATA.restSec, groupBreak = false) {
   resetCount(); S.phase = 'rest'; S.restLeft = sec; S.groupBreak = groupBreak; mPause();
   mSeek(seg().start + 1); renderChips(); renderHud();
@@ -178,7 +180,7 @@ function startActive() {
   S.phase = 'active'; S.groupBreak = false; restAudio.pause(); $('bigBtns').style.display = 'none'; hideBig(); beep(1200, 0.25); renderChips();
   S.startedAt ??= new Date();
   S.plan[S.g] ??= { m: Math.floor(Math.random() * NM()), at: 4 + Math.random() * 14 }; // 每组随机抓拍:随机动作 + 随机时刻
-  setMsg('开始!左右腿各抬一次算 1 次', '');
+  setMsg(HOLD ? '开始!保持身体成一条直线,姿势标准才计时' : '开始!左右腿各抬一次算 1 次', '');
   mSeek(seg().start + 1); mPlay();
 }
 function completeMove() {
@@ -317,7 +319,36 @@ function onLift(side) {
   }
   if ($('debug').checked) $('dbgBox').textContent = `side=${side} score=${sc.toFixed(2)} lim=${lim}\nfeat=` + l.feat.map(v => v.toFixed(2)).join(' ') + '\n' + DATA.templates.map(t => t.name + ':' + score(t, l.feat).toFixed(2)).join('  ');
 }
+// 平板支撑:肩-髋-踝接近一条直线,且身体接近水平(侧面/斜侧面拍摄),姿势标准才累计秒数
+function plankCheck(lm) {
+  const vis = i => (lm[i].visibility ?? 1) > 0.4;
+  let best = null;
+  for (const [s, h, a] of [[11, 23, 27], [12, 24, 28]]) {
+    if (!(vis(s) && vis(h) && vis(a))) continue;
+    const P = i => [lm[i].x * aspect, lm[i].y], S0 = P(s), H0 = P(h), A0 = P(a);
+    const v1 = [S0[0] - H0[0], S0[1] - H0[1]], v2 = [A0[0] - H0[0], A0[1] - H0[1]];
+    const ang = Math.acos(Math.max(-1, Math.min(1, (v1[0] * v2[0] + v1[1] * v2[1]) / (Math.hypot(...v1) * Math.hypot(...v2) + 1e-6)))) * 180 / Math.PI;
+    const len = Math.hypot(S0[0] - A0[0], S0[1] - A0[1]) + 1e-6, tilt = Math.abs(S0[1] - A0[1]) / len; // 越小越水平
+    // 髋相对肩-踝连线:>0 在线下方(塌腰),<0 在线上方(撅臀)
+    const t = ((H0[0] - S0[0]) * (A0[0] - S0[0]) + (H0[1] - S0[1]) * (A0[1] - S0[1])) / (len * len);
+    const off = ((H0[1] - S0[1]) - t * (A0[1] - S0[1])) / len;
+    const c = { ang, tilt, off }; if (!best || ang < best.ang) best = c;
+  }
+  return best;
+}
+function trackHold(lm) {
+  const c = plankCheck(lm);
+  if (!c) { S.good = false; if (S.phase === 'active') setMsg('请侧身面对镜头,让肩、髋、脚踝都进入画面', 'bad'); return; }
+  const flat = c.tilt < 0.3, straight = c.ang > 158;
+  S.good = flat && straight;
+  if (S.phase === 'active' && !S.paused) {
+    if (S.good) { const tips = DATA.tips || [], i = Math.floor(S.moveTime / 8) % Math.max(1, tips.length); setMsg('✓ 姿势标准,计时中' + (tips.length ? ' · 要点:' + tips[i] : ''), 'ok'); }
+    else setMsg(!flat ? '身体要接近水平:前臂撑地,肩膀在肘部正上方' : c.off > 0 ? '腰塌了:收紧腹部和臀部,把髋抬起来' : '臀部太高:把髋放低,身体成一条直线', 'bad');
+  }
+  if ($('debug').checked) $('dbgBox').textContent = `ang=${c.ang.toFixed(0)}° tilt=${c.tilt.toFixed(2)} off=${c.off.toFixed(2)} good=${S.good}`;
+}
 function track(lm) {
+  if (HOLD) return trackHold(lm);
   for (const side of ['L', 'R']) {
     const k = kneeVal(lm, side), l = S.lifts[side];
     if (k < 0) { l.lifting = true; if (k < l.minK) l.minK = k; const f = feats(lm, side), sc = score(tpl(), f); if (sc < (l.best ?? 1e9)) { l.best = sc; l.feat = f; } } // 抬腿过程中取与当前动作最匹配的一帧(手按到膝盖的时机因人而异)
@@ -344,8 +375,9 @@ function loop(now) {
     lastVideoT = cam.currentTime; aspect = cam.videoWidth / cam.videoHeight;
     const r = landmarker.detectForVideo(cam, now), lm = r.landmarks?.[0];
     draw(lm);
-    const ok = lm && [11, 12, 23, 24, 25, 26].every(i => (lm[i].visibility ?? 1) > 0.4);
-    if (!ok && S.phase === 'active') setMsg('请后退,让头到膝盖都进入画面', 'bad');
+    const ok = lm && (HOLD || [11, 12, 23, 24, 25, 26].every(i => (lm[i].visibility ?? 1) > 0.4));
+    if (HOLD && S.phase === 'active' && !lm) { S.good = false; setMsg('没有检测到人,请进入画面', 'bad'); }
+    if (!ok && S.phase === 'active' && !HOLD) setMsg('请后退,让头到膝盖都进入画面', 'bad');
     else if (ok && S.phase !== 'idle' && S.phase !== 'done') track(lm);
   }
   if (!S.paused && (S.phase === 'rest' || S.phase === 'active')) {
@@ -357,6 +389,7 @@ function loop(now) {
       if (S.restLeft <= 0) startActive();
     } else {
       S.moveTime += dt; S.active += dt;
+      if (HOLD && S.good) { S.holdAcc = (S.holdAcc || 0) + dt; if (S.holdAcc >= 1) { S.holdAcc -= 1; S.rep++; if (DATA.reps - S.rep <= 3 && S.rep < DATA.reps) beep(880, 0.08); if (S.rep >= DATA.reps) completeMove(); } }
       const pl = S.plan[S.g]; if (pl && S.imgs[S.g] === undefined && S.m === pl.m && S.moveTime >= pl.at) capture(S.g);
       const s = seg(); if (bgm.currentTime > s.end - 0.5 || bgm.currentTime < s.start) mSeek(s.start + 1); // 循环当前动作的音乐/示范片段
     }
