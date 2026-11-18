@@ -426,6 +426,7 @@ async function showLogin(canCancel) {
   if (!USER) setTimeout(() => $('uName').focus(), 50);
 }
 $('btnUser').onclick = () => showLogin(!!USER);
+$('btnSet').onclick = () => { const o = document.querySelector('header').classList.toggle('opt-open'); $('btnSet').setAttribute('aria-expanded', o); };
 showUser();
 
 // ---------- 休息音乐(用户上传 / 导入) ----------

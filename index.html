@@ -14,7 +14,11 @@ header{display:flex;flex-direction:column;gap:8px;padding:10px 14px;border-botto
 @media(max-width:600px){header h1 small{display:none}}
 header h1 small{font-size:13px;color:var(--mut);font-weight:500}
 header h1{font-size:17px;margin:0;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-#btnUser{flex:none;max-width:46%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:6px 12px;border-radius:999px}
+.hbtns{display:flex;gap:8px;flex:none;max-width:60%}
+.iconbtn{padding:6px 11px;border-radius:999px;font-size:16px;line-height:1}
+header.opt-open #btnSet{border-color:var(--ac)}
+.hrow.tog{display:none}header.opt-open .hrow.tog{display:flex}
+#btnUser{flex:none;min-width:0;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:6px 12px;border-radius:999px}
 .hrow label.sel{flex:1;min-width:0}.hrow label.sel select{flex:1;min-width:0}
 .pill{padding:6px 12px;border:1px solid var(--line);border-radius:999px;background:var(--card);color:var(--fg)}
 .pill small{color:var(--mut)}
@@ -26,6 +30,8 @@ select,input[type=text]{background:#0003;color:var(--fg);border:1px solid var(--
 @media(min-width:760px){
   header{flex-direction:row;flex-wrap:wrap;align-items:center;gap:10px 14px;padding:10px 16px}
   .hrow{display:contents}
+  header.opt-open .hrow.tog{display:contents}
+  .hbtns{max-width:none}
   header h1{flex:1;min-width:200px;max-width:none;overflow:visible}
   #btnUser{max-width:none}
   .hrow label.sel{flex:none}.hrow label.sel select{flex:none}
@@ -95,7 +101,7 @@ body:not(.hideRef) .stage.full .msg{left:calc(122px + env(safe-area-inset-left))
 </head>
 <body>
 <header>
-  <div class="hrow top"><h1 id="title">🏋️ 跟练打卡</h1><button id="btnUser" title="切换用户">👤 登录</button></div>
+  <div class="hrow top"><h1 id="title">🏋️ 跟练打卡</h1><div class="hbtns"><button id="btnSet" class="iconbtn" title="设置(镜像/音乐/调试)" aria-expanded="false">⚙️</button><button id="btnUser" title="切换用户">👤 登录</button></div></div>
   <div class="hrow opts"><label class="sel">项目<select id="wsel"></select></label>
     <label class="sel">识别<select id="sens"><option value="1.4">严格</option><option value="1.8" selected>标准</option><option value="2.6">宽松</option></select></label></div>
   <div class="hrow tog">
