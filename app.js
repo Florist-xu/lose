@@ -426,7 +426,11 @@ async function showLogin(canCancel) {
   if (!USER) setTimeout(() => $('uName').focus(), 50);
 }
 $('btnUser').onclick = () => showLogin(!!USER);
-$('btnSet').onclick = () => { const o = document.querySelector('header').classList.toggle('opt-open'); $('btnSet').setAttribute('aria-expanded', o); };
+const hdr = document.querySelector('header');
+const setOpen = o => { hdr.classList.toggle('opt-open', o); $('btnSet').setAttribute('aria-expanded', o); };
+$('btnSet').onclick = e => { e.stopPropagation(); setOpen(!hdr.classList.contains('opt-open')); };
+['mirror', 'sound', 'debug'].forEach(id => $(id).addEventListener('change', () => setOpen(false))); // 点选后自动折叠
+document.addEventListener('click', e => { if (!e.target.closest('.hrow.tog')) setOpen(false); }); // 点别处也折叠
 showUser();
 
 // ---------- 休息音乐(用户上传 / 导入) ----------
