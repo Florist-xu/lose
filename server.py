@@ -64,6 +64,12 @@ def init_db():
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           title TEXT NOT NULL, ext TEXT NOT NULL, size INTEGER NOT NULL, source TEXT,
           created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')));
+        CREATE TABLE IF NOT EXISTS playlists(
+          id INTEGER PRIMARY KEY AUTOINCREMENT, source TEXT NOT NULL UNIQUE, name TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS playlist_tracks(
+          playlist_id INTEGER NOT NULL REFERENCES playlists(id) ON DELETE CASCADE,
+          music_id INTEGER NOT NULL REFERENCES music(id) ON DELETE CASCADE,
+          position INTEGER NOT NULL, PRIMARY KEY(playlist_id, music_id));
         ''')
         cols = {r['name'] for r in c.execute('PRAGMA table_info(sessions)')}
         if 'workout' not in cols:   # 多运动项目:旧记录都属于第一个项目 fatburn
@@ -260,6 +266,85 @@ def parse_via_service(link):
     return url, (d.get('title') or '')[:60]
 
 
+def import_netease_playlist(text):
+    m = re.search(r'https?://[^\s\u3000"\'<>]+', text or '')
+    if not m:
+        raise ValueError('没有找到歌单链接')
+    cur = m.group(0).rstrip('.,;)]}，。')
+    opener = urllib.request.build_opener(_NoRedirect)
+    for _ in range(5):
+        u = urlparse(cur)
+        if u.scheme not in ('http', 'https') or u.hostname not in ('163cn.tv', 'music.163.com', 'y.music.163.com'):
+            raise ValueError('不支持的歌单链接，目前支持网易云音乐公开歌单')
+        if u.hostname != '163cn.tv':
+            break
+        try:
+            with opener.open(urllib.request.Request(cur, headers={'User-Agent': 'Mozilla/5.0'}), timeout=15):
+                raise ValueError('无法识别网易云短链接')
+        except urllib.error.HTTPError as e:
+            if e.code not in (301, 302, 303, 307, 308) or not e.headers.get('Location'):
+                raise ValueError('网易云短链接解析失败')
+            cur = urljoin(cur, e.headers['Location'])
+        except (urllib.error.URLError, OSError):
+            raise ValueError('无法连接网易云音乐')
+    else:
+        raise ValueError('歌单链接重定向次数过多')
+    ids = parse_qs(u.query).get('id', [])
+    if 'playlist' not in u.path or not ids or not ids[0].isdigit():
+        raise ValueError('请提供网易云歌单分享链接')
+    def api(path):
+        try:
+            req = urllib.request.Request('https://music.163.com/api/' + path, headers={'User-Agent': 'Mozilla/5.0', 'Referer': 'https://music.163.com/'})
+            with urllib.request.urlopen(req, timeout=20) as response:
+                return json.loads(response.read(2_000_000))
+        except (urllib.error.URLError, OSError, ValueError):
+            raise ValueError('获取网易云歌单失败，请稍后重试')
+    data = api('v6/playlist/detail?id=' + ids[0] + '&n=1000')
+    playlist = data.get('playlist') or {}
+    track_ids = [str(x['id']) for x in playlist.get('trackIds', []) if isinstance(x.get('id'), int)]
+    if not track_ids:
+        raise ValueError('无法获取歌单歌曲，歌单可能是私密的或已失效')
+    if len(track_ids) > 500:
+        raise ValueError('歌单超过 500 首，请先拆分歌单')
+    titles = {str(t['id']): t.get('name', '') for t in playlist.get('tracks', [])}
+    missing = [int(i) for i in track_ids if i not in titles]
+    if missing:
+        details = api('song/detail?ids=' + urllib.parse.quote(json.dumps(missing), safe=''))
+        titles.update({str(t['id']): t.get('name', '') for t in details.get('songs', [])})
+    result = api('song/enhance/player/url?ids=' + urllib.parse.quote(json.dumps([int(i) for i in track_ids]), safe='') + '&br=128000')
+    urls = {str(t.get('id')): t for t in result.get('data', [])}
+    imported = skipped = failed = 0
+    members = []
+    for position, song_id in enumerate(track_ids):
+        source = 'netease:' + song_id
+        with db() as c:
+            exists = c.execute('SELECT id FROM music WHERE source=?', (source,)).fetchone()
+        if exists:
+            members.append((exists['id'], position))
+            skipped += 1
+            continue
+        item = urls.get(song_id) or {}
+        if not item.get('url') or item.get('freeTrialInfo') or (item.get('freeTimeTrialPrivilege') or {}).get('type'):
+            failed += 1
+            continue
+        try:
+            song = import_music_link(item['url'])
+            with db() as c:
+                c.execute('UPDATE music SET source=?, title=? WHERE id=?', (source, (titles.get(song_id) or '网易云歌曲 ' + song_id)[:60], song['id']))
+            members.append((song['id'], position))
+            imported += 1
+        except (ValueError, OSError):
+            failed += 1
+    with db() as c:
+        source = 'netease:' + ids[0]
+        name = (playlist.get('name') or '网易云歌单')[:100]
+        c.execute('INSERT INTO playlists(source,name) VALUES(?,?) ON CONFLICT(source) DO UPDATE SET name=excluded.name', (source, name))
+        playlist_id = c.execute('SELECT id FROM playlists WHERE source=?', (source,)).fetchone()['id']
+        c.execute('DELETE FROM playlist_tracks WHERE playlist_id=?', (playlist_id,))
+        c.executemany('INSERT OR IGNORE INTO playlist_tracks(playlist_id,music_id,position) VALUES(?,?,?)', [(playlist_id, mid, pos) for mid, pos in members])
+    return {'name': name, 'id': playlist_id, 'total': len(track_ids), 'imported': imported, 'skipped': skipped, 'failed': failed}
+
+
 def import_music_link(text):
     """从直接的音频文件链接导入。抖音等平台页面链接受反爬保护,无法自动解析。"""
     m = re.search(r'https?://[^\s\u3000"\'<>]+', text or '')
@@ -377,6 +462,16 @@ class H(SimpleHTTPRequestHandler):
                 return self._json(list_workouts())
             if method == 'GET' and parts == ['api', 'music']:
                 return self._json(list_music())
+            if method == 'GET' and parts == ['api', 'playlists']:
+                with db() as c:
+                    playlists = [dict(r) for r in c.execute('SELECT id,name FROM playlists ORDER BY id DESC')]
+                    for playlist in playlists:
+                        playlist['trackIds'] = [r['music_id'] for r in c.execute('SELECT music_id FROM playlist_tracks WHERE playlist_id=? ORDER BY position', (playlist['id'],))]
+                return self._json(playlists)
+            if method == 'DELETE' and len(parts) == 3 and parts[1] == 'playlists' and parts[2].isdigit():
+                with db() as c:
+                    cur = c.execute('DELETE FROM playlists WHERE id=?', (int(parts[2]),))
+                    return self._json({'deleted': cur.rowcount})
             if method == 'PUT' and parts == ['api', 'music']:
                 name = parse_qs(u.query).get('name', ['未命名'])[0]
                 ext = os.path.splitext(name)[1].lstrip('.').lower()
@@ -399,6 +494,15 @@ class H(SimpleHTTPRequestHandler):
                 finally:
                     if os.path.exists(tmp):
                         os.remove(tmp)
+            if method == 'POST' and parts == ['api', 'music', 'playlist']:
+                n = int(self.headers.get('Content-Length') or 0)
+                if n <= 0 or n > 10000:
+                    return self._json({'error': '请求体大小不合法'}, 413)
+                try:
+                    body = json.loads(self.rfile.read(n))
+                except ValueError:
+                    return self._json({'error': 'JSON 格式错误'}, 400)
+                return self._json(import_netease_playlist(str(body.get('url', ''))))
             if method == 'POST' and parts == ['api', 'music', 'link']:
                 n = int(self.headers.get('Content-Length') or 0)
                 if n <= 0 or n > 10000:

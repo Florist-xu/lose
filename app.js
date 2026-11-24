@@ -480,7 +480,7 @@ document.addEventListener('click', e => { if (!e.target.closest('.hrow.tog')) se
 showUser();
 
 // ---------- 休息音乐(用户上传 / 导入) ----------
-let tracks = [], lastTrackId = null;
+let tracks = [], playlists = [], lastTrackId = null;
 const blobCache = new Map();
 const MIME = { mp3: 'audio/mpeg', m4a: 'audio/mp4', aac: 'audio/aac', wav: 'audio/wav', ogg: 'audio/ogg', flac: 'audio/flac', mp4: 'video/mp4' };
 const chosen = () => { try { return localStorage.getItem('restMusic') || 'all'; } catch { return 'all'; } };
@@ -495,6 +495,13 @@ async function trackURL(t) { // 用 fetch 下载成 blob 再播放(兼容 iPhone
 function pickTrack(forceAll) {
   if (!tracks.length) return null;
   const c = chosen();
+  if (c.startsWith('playlist:')) {
+    const p = playlists.find(x => String(x.id) === c.slice(9));
+    const ids = (p?.trackIds || []).filter(id => tracks.some(t => t.id === id));
+    if (!ids.length) return null;
+    const index = ids.indexOf(lastTrackId);
+    return tracks.find(t => t.id === ids[(index + 1) % ids.length]);
+  }
   if (!forceAll && c !== 'all') { const t = tracks.find(x => String(x.id) === c); if (t) return t; }
   const pool = tracks.length > 1 ? tracks.filter(x => x.id !== lastTrackId) : tracks;
   return pool[Math.floor(Math.random() * pool.length)];
@@ -502,11 +509,13 @@ function pickTrack(forceAll) {
 async function prepareRest(forceAll = false) {
   const t = pickTrack(forceAll);
   if (!t) { restAudio.removeAttribute('src'); restAudio.load(); return; }
-  try { restAudio.src = await trackURL(t); lastTrackId = t.id; restAudio.loop = !forceAll && chosen() !== 'all'; } catch (e) { console.warn('休息音乐加载失败', e); }
+  try { restAudio.src = await trackURL(t); lastTrackId = t.id; restAudio.loop = !forceAll && chosen() !== 'all' && !chosen().startsWith('playlist:'); } catch (e) { console.warn('休息音乐加载失败', e); }
 }
 async function loadTracks() {
-  const r = await fetch('api/music'); const j = await r.json();
+  const [r, pr] = await Promise.all([fetch('api/music'), fetch('api/playlists')]);
+  const j = await r.json(), pj = await pr.json();
   tracks = Array.isArray(j) ? j : [];
+  playlists = Array.isArray(pj) ? pj : [];
   await prepareRest();
 }
 function playRestMusic() {
@@ -522,20 +531,22 @@ $('bNextTrack').onclick = async () => { await prepareRest(true); playRestMusic()
 async function openMusic() {
   try { await loadTracks(); } catch {}
   const c = chosen();
+  const playlistRows = playlists.map(p => `<div class="dayrow" style="cursor:default"><label title="选择歌单顺序播放"><input type="radio" name="rm" value="playlist:${p.id}" ${c === 'playlist:' + p.id ? 'checked' : ''}><span class="sub">播放</span></label><button type="button" data-open-playlist="${p.id}" aria-expanded="false" aria-controls="playlist-tracks-${p.id}" style="flex:1;min-width:0;text-align:left">${esc(p.name)} <span style="color:var(--mut)">${p.trackIds.length} 首</span> ▾</button><button class="danger" data-del-playlist="${p.id}">删除歌单</button></div><div id="playlist-tracks-${p.id}" hidden>${p.trackIds.map(id => tracks.find(t => t.id === id)).filter(Boolean).map((t, i) => `<div class="dayrow" style="cursor:default"><span style="flex:1;min-width:0">${i + 1}. ${esc(t.title)}</span><button data-prev="${t.id}">试听</button></div>`).join('') || '<div class="sub">歌单中暂无歌曲</div>'}</div>`).join('');
   const rows = tracks.map(t => `<div class="dayrow" style="cursor:default"><label style="flex:1;gap:8px;color:var(--fg)"><input type="radio" name="rm" value="${t.id}" ${String(t.id) === c ? 'checked' : ''}>${esc(t.title)} <span style="color:var(--mut)">${mb(t.size)}</span></label>
     <span><button data-prev="${t.id}">试听</button> <button class="danger" data-del="${t.id}">删除</button></span></div>`).join('');
   openModal(`<h2>休息音乐</h2><div class="sub">每组结束后会中场休息 2 分钟,期间播放这里选中的音乐。</div>
     <div class="btns" style="margin-top:6px"><button id="mUpload" class="pri">上传音频/视频文件</button></div>
     <input id="mFile" type="file" accept=".mp3,.m4a,.aac,.wav,.ogg,.flac,.mp4,audio/*,video/mp4" style="display:none">
-    <div style="display:flex;gap:8px;margin-top:10px"><div style="position:relative;flex:1;min-width:0"><input id="mLink" placeholder="粘贴音频直链(以 http 开头的 mp3/m4a 文件地址)" style="width:100%;box-sizing:border-box;padding:9px 34px 9px 9px;border-radius:8px;border:1px solid var(--line);background:#0003;color:var(--fg)"><button id="mClear" type="button" aria-label="清空" style="display:none;position:absolute;right:4px;top:50%;transform:translateY(-50%);width:28px;height:28px;padding:0;border-radius:50%;line-height:1">✕</button></div><button id="mImport">导入</button></div>
+    <div style="display:flex;gap:8px;margin-top:10px"><div style="position:relative;flex:1;min-width:0"><input id="mLink" placeholder="粘贴音频直链(以 http 开头的 mp3/m4a 文件地址)" style="width:100%;box-sizing:border-box;padding:9px 34px 9px 9px;border-radius:8px;border:1px solid var(--line);background:#0003;color:var(--fg)"><button id="mClear" type="button" aria-label="清空" style="display:none;position:absolute;right:4px;top:50%;transform:translateY(-50%);width:28px;height:28px;padding:0;border-radius:50%;line-height:1">✕</button></div><button id="mImport">导入</button><button id="mPlaylist">导入歌单</button></div>
     <div class="note" style="color:var(--mut)">可直接粘贴抖音分享文字/链接(需服务器已配置 PARSER_URL 并启动 media-parser,见 README);未配置时请在抖音里「保存视频」,再点上方上传该文件(mp4 也行,只播放声音)。</div>
     <div id="note" class="note"></div>
     <div style="margin:12px 0 6px;font-size:13px;color:var(--mut)">播放方式</div>
     <div class="dayrow" style="cursor:default"><label style="flex:1;gap:8px;color:var(--fg)"><input type="radio" name="rm" value="all" ${c === 'all' ? 'checked' : ''}>全部随机播放</label></div>
-    ${rows || '<div class="sub">还没有音乐,先上传一个吧</div>'}
+    ${playlistRows}
+    ${rows ? `<details><summary>全部歌曲 (${tracks.length})</summary>${rows}</details>` : '<div class="sub">还没有音乐,先上传一个吧</div>'}
     <div class="btns"><button id="bClose">完成</button></div>`, true);
   $('bClose').onclick = () => { restAudio.pause(); closeModal(); prepareRest(); };
-  mbox.querySelectorAll('input[name=rm]').forEach(r => r.onchange = () => { try { localStorage.setItem('restMusic', r.value); } catch {} });
+  mbox.querySelectorAll('input[name=rm]').forEach(r => r.onchange = () => { lastTrackId = null; try { localStorage.setItem('restMusic', r.value); } catch {} });
   const lk = $('mLink'), syncClr = () => { $('mClear').style.display = lk.value ? 'block' : 'none'; };
   lk.oninput = syncClr; $('mClear').onclick = () => { lk.value = ''; syncClr(); setNote(''); lk.focus(); };
   $('mUpload').onclick = () => $('mFile').click();
@@ -557,6 +568,30 @@ async function openMusic() {
       openMusic();
     } catch (err) { setNote(err.message, 'bad'); $('mImport').disabled = false; }
   };
+  $('mPlaylist').onclick = async () => {
+    const url = $('mLink').value.trim(); if (!url) return setNote('请先粘贴网易云歌单链接', 'bad');
+    setNote('正在导入歌单，歌曲较多时可能需要几分钟…');
+    $('mPlaylist').disabled = true; $('mImport').disabled = true;
+    try {
+      const r = await fetch('api/music/playlist', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url }) });
+      const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status));
+      await openMusic();
+      setNote(`歌单 ${j.name}：共 ${j.total} 首，导入 ${j.imported} 首，已存在 ${j.skipped} 首，不可用或失败 ${j.failed} 首`);
+    } catch (err) { setNote(err.message, 'bad'); $('mPlaylist').disabled = false; $('mImport').disabled = false; }
+  };
+  mbox.querySelectorAll('[data-open-playlist]').forEach(b => b.onclick = () => {
+    const list = $('playlist-tracks-' + b.dataset.openPlaylist);
+    list.hidden = !list.hidden;
+    b.setAttribute('aria-expanded', String(!list.hidden));
+  });
+  mbox.querySelectorAll('[data-del-playlist]').forEach(b => b.onclick = async () => {
+    if (!confirm('删除歌单？歌曲文件会保留。')) return;
+    const id = b.dataset.delPlaylist;
+    const r = await fetch('api/playlists/' + id, { method: 'DELETE' });
+    if (!r.ok) return setNote('删除歌单失败', 'bad');
+    if (chosen() === 'playlist:' + id) { try { localStorage.setItem('restMusic', 'all'); } catch {} }
+    await openMusic();
+  });
   mbox.querySelectorAll('[data-prev]').forEach(b => b.onclick = async () => {
     const t = tracks.find(x => String(x.id) === b.dataset.prev); if (!t) return;
     if (!restAudio.paused && restAudio.dataset.prev === b.dataset.prev) { restAudio.pause(); b.textContent = '试听'; return; }
