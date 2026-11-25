@@ -544,8 +544,16 @@ async function openMusic() {
     <div class="dayrow" style="cursor:default"><label style="flex:1;gap:8px;color:var(--fg)"><input type="radio" name="rm" value="all" ${c === 'all' ? 'checked' : ''}>全部随机播放</label></div>
     ${playlistRows}
     ${rows ? `<details><summary>全部歌曲 (${tracks.length})</summary>${rows}</details>` : '<div class="sub">还没有音乐,先上传一个吧</div>'}
-    <div class="btns"><button id="bClose">完成</button></div>`, true);
+    <div class="btns"><button id="bClose">完成</button>${tracks.length ? '<button id="bDelAll" class="danger">全部删除</button>' : ''}</div>`, true);
   $('bClose').onclick = () => { restAudio.pause(); closeModal(); prepareRest(); };
+  if ($('bDelAll')) $('bDelAll').onclick = async () => {
+    if (!confirm(`确定删除全部 ${tracks.length} 首休息音乐和所有歌单吗?无法恢复。`)) return;
+    restAudio.pause(); const r = await fetch('api/music', { method: 'DELETE' });
+    if (!r.ok) return setNote('删除失败', 'bad');
+    blobCache.forEach(u => URL.revokeObjectURL(u)); blobCache.clear();
+    try { localStorage.setItem('restMusic', 'all'); } catch {}
+    openMusic();
+  };
   mbox.querySelectorAll('input[name=rm]').forEach(r => r.onchange = () => { lastTrackId = null; try { localStorage.setItem('restMusic', r.value); } catch {} });
   const lk = $('mLink'), syncClr = () => { $('mClear').style.display = lk.value ? 'block' : 'none'; };
   lk.oninput = syncClr; $('mClear').onclick = () => { lk.value = ''; syncClr(); setNote(''); lk.focus(); };
@@ -576,7 +584,7 @@ async function openMusic() {
       const r = await fetch('api/music/playlist', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url }) });
       const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status));
       await openMusic();
-      setNote(`歌单 ${j.name}：共 ${j.total} 首，导入 ${j.imported} 首，已存在 ${j.skipped} 首，不可用或失败 ${j.failed} 首`);
+      setNote(`歌单 ${j.name}：共 ${j.total} 首，导入 ${j.imported} 首，已存在 ${j.skipped} 首，VIP/无版权无法导入 ${j.vip ?? 0} 首,下载失败 ${j.failed} 首`);
     } catch (err) { setNote(err.message, 'bad'); $('mPlaylist').disabled = false; $('mImport').disabled = false; }
   };
   mbox.querySelectorAll('[data-open-playlist]').forEach(b => b.onclick = () => {
@@ -585,7 +593,7 @@ async function openMusic() {
     b.setAttribute('aria-expanded', String(!list.hidden));
   });
   mbox.querySelectorAll('[data-del-playlist]').forEach(b => b.onclick = async () => {
-    if (!confirm('删除歌单？歌曲文件会保留。')) return;
+    if (!confirm('删除歌单?歌单里的歌曲也会一并删除(被其他歌单使用的除外),无法恢复。')) return;
     const id = b.dataset.delPlaylist;
     const r = await fetch('api/playlists/' + id, { method: 'DELETE' });
     if (!r.ok) return setNote('删除歌单失败', 'bad');

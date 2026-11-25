@@ -313,7 +313,7 @@ def import_netease_playlist(text):
         titles.update({str(t['id']): t.get('name', '') for t in details.get('songs', [])})
     result = api('song/enhance/player/url?ids=' + urllib.parse.quote(json.dumps([int(i) for i in track_ids]), safe='') + '&br=128000')
     urls = {str(t.get('id')): t for t in result.get('data', [])}
-    imported = skipped = failed = 0
+    imported = skipped = failed = vip = 0
     members = []
     for position, song_id in enumerate(track_ids):
         source = 'netease:' + song_id
@@ -325,7 +325,7 @@ def import_netease_playlist(text):
             continue
         item = urls.get(song_id) or {}
         if not item.get('url') or item.get('freeTrialInfo') or (item.get('freeTimeTrialPrivilege') or {}).get('type'):
-            failed += 1
+            vip += 1   # 网易云 VIP/无版权歌曲拿不到完整音频(code -110 等),无法导入
             continue
         try:
             song = import_music_link(item['url'])
@@ -342,7 +342,7 @@ def import_netease_playlist(text):
         playlist_id = c.execute('SELECT id FROM playlists WHERE source=?', (source,)).fetchone()['id']
         c.execute('DELETE FROM playlist_tracks WHERE playlist_id=?', (playlist_id,))
         c.executemany('INSERT OR IGNORE INTO playlist_tracks(playlist_id,music_id,position) VALUES(?,?,?)', [(playlist_id, mid, pos) for mid, pos in members])
-    return {'name': name, 'id': playlist_id, 'total': len(track_ids), 'imported': imported, 'skipped': skipped, 'failed': failed}
+    return {'name': name, 'id': playlist_id, 'total': len(track_ids), 'imported': imported, 'skipped': skipped, 'failed': failed, 'vip': vip}
 
 
 def import_music_link(text):
@@ -469,9 +469,13 @@ class H(SimpleHTTPRequestHandler):
                         playlist['trackIds'] = [r['music_id'] for r in c.execute('SELECT music_id FROM playlist_tracks WHERE playlist_id=? ORDER BY position', (playlist['id'],))]
                 return self._json(playlists)
             if method == 'DELETE' and len(parts) == 3 and parts[1] == 'playlists' and parts[2].isdigit():
-                with db() as c:
-                    cur = c.execute('DELETE FROM playlists WHERE id=?', (int(parts[2]),))
-                    return self._json({'deleted': cur.rowcount})
+                pid = int(parts[2])
+                with db() as c:   # 删歌单时连同歌曲一起删(仍被其他歌单引用的歌曲保留)
+                    mids = [r['music_id'] for r in c.execute(
+                        'SELECT music_id FROM playlist_tracks WHERE playlist_id=? AND music_id NOT IN (SELECT music_id FROM playlist_tracks WHERE playlist_id<>?)', (pid, pid))]
+                    cur = c.execute('DELETE FROM playlists WHERE id=?', (pid,))
+                removed = sum(delete_music(m) for m in mids)
+                return self._json({'deleted': cur.rowcount, 'songs_deleted': removed})
             if method == 'PUT' and parts == ['api', 'music']:
                 name = parse_qs(u.query).get('name', ['未命名'])[0]
                 ext = os.path.splitext(name)[1].lstrip('.').lower()
@@ -512,6 +516,11 @@ class H(SimpleHTTPRequestHandler):
                 except ValueError:
                     return self._json({'error': 'JSON 格式错误'}, 400)
                 return self._json(import_music_link(str(body.get('url', ''))), 201)
+            if method == 'DELETE' and parts == ['api', 'music']:   # 清空全部休息音乐(含歌单)
+                with db() as c:
+                    mids = [r['id'] for r in c.execute('SELECT id FROM music')]
+                    c.execute('DELETE FROM playlists')
+                return self._json({'deleted': sum(delete_music(m) for m in mids)})
             if method == 'DELETE' and len(parts) == 3 and parts[1] == 'music' and parts[2].isdigit():
                 return self._json({'deleted': delete_music(int(parts[2]))})
             return self._json({'error': '接口不存在'}, 404)
