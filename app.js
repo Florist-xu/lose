@@ -401,6 +401,7 @@ function loop(now) {
       if (S.restLeft <= 0) startActive();
     } else {
       S.moveTime += dt; S.active += dt;
+      if (!restAudio.paused && Date.now() >= relaxUntil) restAudio.pause(); // 训练中休息音乐必须是暂停的
       if (HOLD && S.good) { S.holdAcc = (S.holdAcc || 0) + dt; if (S.holdAcc >= 1) { S.holdAcc -= 1; S.rep++; if (DATA.reps - S.rep <= 3 && S.rep < DATA.reps) beep(880, 0.08); if (S.rep >= DATA.reps) completeMove(); } }
       const pl = S.plan[S.g]; if (pl && S.imgs[S.g] === undefined && S.m === pl.m && S.moveTime >= pl.at) capture(S.g);
       const s = seg(); if (bgm.currentTime > s.end - 0.5 || bgm.currentTime < s.start) mSeek(s.start + 1); // 循环当前动作的音乐/示范片段
@@ -518,9 +519,23 @@ async function loadTracks() {
   playlists = Array.isArray(pj) ? pj : [];
   await prepareRest();
 }
+// 休息结束时暂停并记住进度,下次休息从断点继续(同一首歌),而不是重新开始
+let restPos = { src: '', t: 0 };
+restAudio.addEventListener('pause', () => { if (!restAudio.ended && restAudio.currentTime > 0.5) restPos = { src: restAudio.src, t: restAudio.currentTime }; });
+// 休息音乐进度条:训练中常驻在画面顶部,▶(绿)=正在播放,⏸=已暂停,一眼看出是否暂停
+const mbar = $('musicBar'), mm = t => Math.floor(t / 60) + ':' + String(Math.floor(t % 60)).padStart(2, '0');
+function syncMusicBar() {
+  const has = !!restAudio.getAttribute('src') && restAudio.readyState > 0 && isFinite(restAudio.duration);
+  mbar.classList.toggle('has', has); if (!has) return;
+  const playing = !restAudio.paused; mbar.classList.toggle('playing', playing); $('mbIcon').textContent = playing ? '▶' : '⏸';
+  const t = tracks.find(x => x.id === lastTrackId); $('mbTitle').textContent = t ? t.title : '';
+  $('mbFill').style.width = (restAudio.currentTime / restAudio.duration * 100) + '%'; $('mbTime').textContent = mm(restAudio.currentTime) + '/' + mm(restAudio.duration);
+}
+['timeupdate', 'play', 'pause', 'loadedmetadata', 'emptied'].forEach(ev => restAudio.addEventListener(ev, syncMusicBar));
 function playRestMusic() {
   if (!tracks.length) { $('bigS').textContent += '(还没有休息音乐,训练结束后可在页头「休息音乐」里添加)'; return; }
   restAudio.muted = false;
+  if (restPos.src === restAudio.src && restAudio.currentTime < restPos.t - 1) { try { restAudio.currentTime = restPos.t; } catch {} }
   restAudio.play().catch(() => setMsg('休息音乐被浏览器拦截,点一下"音乐"按钮开启', 'bad'));
 }
 restAudio.addEventListener('ended', async () => { await prepareRest(); if (S.phase === 'rest' && S.groupBreak && !S.paused) playRestMusic(); else if (Date.now() < relaxUntil) restAudio.play().catch(() => {}); });
