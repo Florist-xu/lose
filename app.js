@@ -526,7 +526,7 @@ restAudio.addEventListener('pause', () => { if (!restAudio.ended && restAudio.cu
 const mbar = $('musicBar'), mm = t => Math.floor(t / 60) + ':' + String(Math.floor(t % 60)).padStart(2, '0');
 function syncMusicBar() {
   const has = !!restAudio.getAttribute('src') && restAudio.readyState > 0 && isFinite(restAudio.duration);
-  mbar.classList.toggle('has', has); if (!has) return;
+  mbar.classList.toggle('has', has); $('mbLine').classList.toggle('has', has); if (!has) return;
   const playing = !restAudio.paused; mbar.classList.toggle('playing', playing); $('mbIcon').textContent = playing ? '▶' : '⏸';
   const t = tracks.find(x => x.id === lastTrackId); $('mbTitle').textContent = t ? t.title : '';
   $('mbFill').style.width = (restAudio.currentTime / restAudio.duration * 100) + '%'; $('mbTime').textContent = mm(restAudio.currentTime) + '/' + mm(restAudio.duration);

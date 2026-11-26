@@ -100,13 +100,15 @@ body:not(.hideRef) .stage.full .msg{left:calc(122px + env(safe-area-inset-left))
 .dayrow:hover{outline:1px solid var(--ac)}.sess{border-top:1px solid var(--line);padding:10px 0}
 .note{font-size:13px;margin-top:8px}.note.ok{color:var(--ok)}.note.bad{color:var(--bad)}
 .dbg{font:11px/1.5 Consolas,monospace;color:var(--mut);white-space:pre-wrap}
-#musicBar{display:none;position:absolute;z-index:4;left:10px;right:10px;top:112px;gap:8px;align-items:center;padding:5px 10px;border-radius:999px;background:#000a;font-size:12px;color:#fff;pointer-events:none}
+#musicBar{display:none;position:absolute;z-index:4;right:16px;top:72px;align-items:center;gap:6px;padding:3px 10px;border-radius:999px;background:#0008;font-size:12px;color:#fff;pointer-events:none;font-variant-numeric:tabular-nums}
 body.training #musicBar.has{display:flex}
-#musicBar #mbTitle{max-width:32%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-#musicBar .mbTrack{flex:1;height:4px;border-radius:2px;background:#fff4;overflow:hidden}
-#musicBar .mbTrack i{display:block;height:100%;width:0;background:var(--ac)}
+#musicBar #mbTitle{display:none}
+#musicBar .mbTrack{position:fixed;display:none}
 #musicBar.playing #mbIcon{color:#3ddc84}
-.stage.full #musicBar{top:calc(112px + env(safe-area-inset-top));left:calc(10px + env(safe-area-inset-left));right:calc(10px + env(safe-area-inset-right))}
+#mbLine{display:none;position:absolute;z-index:4;left:0;right:0;top:0;height:3px;background:#fff3;pointer-events:none}
+#mbLine i{display:block;height:100%;width:0;background:var(--ac)}
+body.training #mbLine.has{display:block}
+.stage.full #musicBar{top:calc(72px + env(safe-area-inset-top));right:calc(16px + env(safe-area-inset-right))}
 </style>
 </head>
 <body>
@@ -136,7 +138,7 @@ body.training #musicBar.has{display:flex}
       <div class="count"><span id="cnt">0</span><small id="cntMax">/20</small></div>
       <div class="msg" id="msg">点击上方"开启摄像头并开始"</div>
       <div class="fsbar"><button id="fsRef">隐藏示范</button><button id="fsPause">暂停</button><button id="fsSkip">跳过</button><button id="fsEnd">结束</button><button id="fsExit">退出全屏</button></div>
-      <div id="musicBar"><span id="mbIcon">⏸</span><span id="mbTitle"></span><div class="mbTrack"><i id="mbFill"></i></div><span id="mbTime">0:00/0:00</span></div>
+      <div id="mbLine"><i id="mbFill"></i></div><div id="musicBar"><span id="mbIcon">⏸</span><span id="mbTitle"></span><span id="mbTime">0:00/0:00</span></div>
       <div class="big" id="big"><div class="h" id="bigH"></div><div class="cd" id="bigCd"></div><div class="s" id="bigS"></div>
         <div class="bigBtns" id="bigBtns" style="display:none"><button id="bSkipRest" class="pri">跳过休息</button><button id="bPauseMusic">⏸ 音乐</button><button id="bNextTrack">下一首</button></div></div>
     </div>
