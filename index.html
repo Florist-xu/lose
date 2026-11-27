@@ -100,15 +100,20 @@ body:not(.hideRef) .stage.full .msg{left:calc(122px + env(safe-area-inset-left))
 .dayrow:hover{outline:1px solid var(--ac)}.sess{border-top:1px solid var(--line);padding:10px 0}
 .note{font-size:13px;margin-top:8px}.note.ok{color:var(--ok)}.note.bad{color:var(--bad)}
 .dbg{font:11px/1.5 Consolas,monospace;color:var(--mut);white-space:pre-wrap}
-#musicBar{display:none;position:absolute;z-index:4;right:16px;top:72px;align-items:center;gap:6px;padding:3px 10px;border-radius:999px;background:#0008;font-size:12px;color:#fff;pointer-events:none;font-variant-numeric:tabular-nums}
-body.training #musicBar.has{display:flex}
-#musicBar #mbTitle{display:none}
-#musicBar .mbTrack{position:fixed;display:none}
-#musicBar.playing #mbIcon{color:#3ddc84}
-#mbLine{display:none;position:absolute;z-index:4;left:0;right:0;top:0;height:3px;background:#fff3;pointer-events:none}
-#mbLine i{display:block;height:100%;width:0;background:var(--ac)}
-body.training #mbLine.has{display:block}
-.stage.full #musicBar{top:calc(72px + env(safe-area-inset-top));right:calc(16px + env(safe-area-inset-right))}
+#musicBar{display:none;position:absolute;z-index:4;left:12px;right:12px;bottom:6px;height:22px;border-radius:11px;background:#ffffff26;overflow:hidden;pointer-events:none;color:#fff;font-size:12px;font-variant-numeric:tabular-nums;box-shadow:0 0 0 1px #0007}
+body.training #musicBar.has{display:block}
+#musicBar .mbTrack{position:absolute;inset:0}
+#musicBar .mbTrack i{display:block;height:100%;width:0;background:linear-gradient(90deg,#c98a00,#ffd23f 70%,#fff2a8);box-shadow:0 0 12px #ffd23f}
+#musicBar.playing .mbTrack i{background-size:200% 100%;animation:mbShine 1.8s linear infinite}
+#musicBar.indet .mbTrack i{width:30%!important;animation:mbSlide 1.4s ease-in-out infinite}
+@keyframes mbShine{to{background-position:-200% 0}}
+@keyframes mbSlide{0%{margin-left:-30%}100%{margin-left:100%}}
+#musicBar .mbRow{position:absolute;inset:0;display:flex;align-items:center;gap:8px;padding:0 10px;text-shadow:0 1px 3px #000}
+#musicBar #mbIcon{font-size:11px}#musicBar.playing #mbIcon{color:#3ddc84}
+#musicBar #mbTitle{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.stage.full #musicBar{bottom:calc(8px + env(safe-area-inset-bottom));left:calc(12px + env(safe-area-inset-left));right:calc(12px + env(safe-area-inset-right))}
+body.musicOn .stage.full .fsbar{bottom:calc(40px + env(safe-area-inset-bottom))}
+body.musicOn .stage.full #refCard{bottom:calc(94px + env(safe-area-inset-bottom))}
 </style>
 </head>
 <body>
@@ -138,7 +143,7 @@ body.training #mbLine.has{display:block}
       <div class="count"><span id="cnt">0</span><small id="cntMax">/20</small></div>
       <div class="msg" id="msg">点击上方"开启摄像头并开始"</div>
       <div class="fsbar"><button id="fsRef">隐藏示范</button><button id="fsPause">暂停</button><button id="fsSkip">跳过</button><button id="fsEnd">结束</button><button id="fsExit">退出全屏</button></div>
-      <div id="mbLine"><i id="mbFill"></i></div><div id="musicBar"><span id="mbIcon">⏸</span><span id="mbTitle"></span><span id="mbTime">0:00/0:00</span></div>
+      <div id="musicBar"><div class="mbTrack"><i id="mbFill"></i></div><div class="mbRow"><span id="mbIcon">⏸</span><span id="mbTitle"></span><span id="mbTime">0:00</span></div></div>
       <div class="big" id="big"><div class="h" id="bigH"></div><div class="cd" id="bigCd"></div><div class="s" id="bigS"></div>
         <div class="bigBtns" id="bigBtns" style="display:none"><button id="bSkipRest" class="pri">跳过休息</button><button id="bPauseMusic">⏸ 音乐</button><button id="bNextTrack">下一首</button></div></div>
     </div>

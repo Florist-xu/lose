@@ -408,6 +408,7 @@ function loop(now) {
     }
     renderHud();
   }
+  if (S.phase === 'rest' || S.phase === 'active') syncMusicBar();
   requestAnimationFrame(loop);
 }
 
@@ -525,11 +526,14 @@ restAudio.addEventListener('pause', () => { if (!restAudio.ended && restAudio.cu
 // 休息音乐进度条:训练中常驻在画面顶部,▶(绿)=正在播放,⏸=已暂停,一眼看出是否暂停
 const mbar = $('musicBar'), mm = t => Math.floor(t / 60) + ':' + String(Math.floor(t % 60)).padStart(2, '0');
 function syncMusicBar() {
-  const has = !!restAudio.getAttribute('src') && restAudio.readyState > 0 && isFinite(restAudio.duration);
-  mbar.classList.toggle('has', has); $('mbLine').classList.toggle('has', has); if (!has) return;
-  const playing = !restAudio.paused; mbar.classList.toggle('playing', playing); $('mbIcon').textContent = playing ? '▶' : '⏸';
+  const has = !!restAudio.getAttribute('src') && restAudio.readyState > 0;
+  mbar.classList.toggle('has', has); document.body.classList.toggle('musicOn', has); if (!has) return;
+  const playing = !restAudio.paused, d = restAudio.duration, known = isFinite(d) && d > 0;
+  mbar.classList.toggle('playing', playing); mbar.classList.toggle('indet', !known && playing);
+  $('mbIcon').textContent = playing ? '▶ 播放中' : '⏸ 已暂停';
   const t = tracks.find(x => x.id === lastTrackId); $('mbTitle').textContent = t ? t.title : '';
-  $('mbFill').style.width = (restAudio.currentTime / restAudio.duration * 100) + '%'; $('mbTime').textContent = mm(restAudio.currentTime) + '/' + mm(restAudio.duration);
+  $('mbFill').style.width = known ? (restAudio.currentTime / d * 100) + '%' : '0';
+  $('mbTime').textContent = mm(restAudio.currentTime) + (known ? ' / ' + mm(d) : '');
 }
 ['timeupdate', 'play', 'pause', 'loadedmetadata', 'emptied'].forEach(ev => restAudio.addEventListener(ev, syncMusicBar));
 function playRestMusic() {
