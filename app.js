@@ -950,7 +950,7 @@ const PIC = {
 const MODES = { list: ['list', '顺序播放'], shuffle: ['shuffle', '随机播放'], one: ['one', '单曲循环'] };
 const player = $('player');
 $('pClose').innerHTML = PIC.down; $('pStyle').innerHTML = '<svg viewBox="0 0 24 24"><path d="M12 3l1.8 4.7L18.5 9.5l-4.7 1.8L12 16l-1.8-4.7L5.5 9.5l4.7-1.8z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/></svg>'; $('pStyle').onclick = openLySheet; $('pPrev').innerHTML = PIC.prev; $('pNext').innerHTML = IC.next;
-function openPlayer() { if (!curItem()) return; player.hidden = false; fxAudio(); requestAnimationFrame(fxResize); requestAnimationFrame(() => player.classList.add('show')); syncPlayer(); syncMini(); lyTick(true); }
+function openPlayer() { if (!curItem()) return; player.hidden = false; fxAudio(); requestAnimationFrame(() => { fxResize(); stageApply(); }); requestAnimationFrame(() => player.classList.add('show')); syncPlayer(); syncMini(); lyTick(true); }
 function closePlayer() { player.classList.remove('show'); setTimeout(() => { player.hidden = true; syncMini(); }, 280); }
 $('pClose').onclick = closePlayer;
 $('pView').onclick = () => { player.classList.toggle('v-lyric'); $('pView').innerHTML = player.classList.contains('v-lyric') ? PIC.disc : PIC.lyric; lyTick(true); };
@@ -994,6 +994,8 @@ function syncPlayer() {
     $('pCover').hidden = !it.cover; $('pCoverFb').hidden = !!it.cover;
     if (it.cover) { const big = it.cover.replace(/param=\d+y\d+/, 'param=600y600'); $('pCover').src = big; $('pBg').style.backgroundImage = `url("${it.cover}")`; coverColor(it.cover); }
     else { $('pCoverFb').style.background = grad(it.title); $('pCoverFb').textContent = [...it.title][0] || '♪'; $('pBg').style.backgroundImage = grad(it.title); player.style.removeProperty('--pc'); }
+    if (ST.img) $('pBg').style.backgroundImage = `url("${ST.img}")`;   // 自定义背景图优先
+    stageSource(it.cover);
   }
   const playing = !restAudio.paused;
   player.classList.toggle('playing', playing);
@@ -1170,8 +1172,11 @@ function fxFrame(now) {
   }
   c.globalAlpha = 1; c.globalCompositeOperation = 'source-over';
 }
+let stLast = performance.now();
 (function lyLoop(now) {
+  now = now || performance.now(); const sdt = Math.min(0.05, (now - stLast) / 1000); stLast = now;
   if (!player.hidden) {
+    stageFrame(now, sdt);
     if (!restAudio.paused) { lyTick(false); const d = restAudio.duration; if (isFinite(d) && d > 0) { $('pFill').style.width = restAudio.currentTime / d * 100 + '%'; $('pCurT').textContent = dur(restAudio.currentTime || 0.001); $('pDurT').textContent = dur(d); } }
     fxFrame(now || performance.now());
   }
@@ -1179,15 +1184,149 @@ function fxFrame(now) {
 })();
 restAudio.addEventListener('loadedmetadata', () => { const d = restAudio.duration; if (isFinite(d)) $('pDurT').textContent = dur(d); });
 
+// ---------- 粒子舞台(WebGL):用背景图(默认封面)生成一圈粒子地形,随音乐频谱起伏 ----------
+// 中心对应低频、外圈对应高频;粒子颜色取自图片,亮的地方起伏更高
+const ST = { on: lsGet('lyBg', 'stage') === 'stage', img: lsGet('stageImg'), gl: null, prog: null, n: 0, buf: null, spec: null, specTex: null, cvs: $('pStage'), w: 0, h: 0, src: '', loading: '', rot: 0, specArr: new Uint8Array(128) };
+function stageInit() {
+  if (ST.gl) return true;
+  const gl = ST.cvs.getContext('webgl', { antialias: false, alpha: true, premultipliedAlpha: false });
+  if (!gl) return false;
+  const sh = (type, src) => { const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s); if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s)); return s; };
+  const vs = `attribute vec2 aPos; attribute vec3 aCol; attribute float aSeed;
+    uniform mat4 uMVP; uniform sampler2D uSpec; uniform float uTime, uBeat, uPx;
+    varying vec3 vCol; varying float vA;
+    void main(){
+      float r = length(aPos);
+      float s = texture2D(uSpec, vec2(0.02 + r * 0.7, 0.5)).r;
+      float lum = dot(aCol, vec3(0.3, 0.59, 0.11));
+      float h = s * (0.18 + 0.82 * lum) * 0.75 + sin(uTime * 1.3 + aSeed * 6.283 + r * 7.0) * 0.012 + uBeat * 0.06 * (1.0 - r);
+      vec4 p = uMVP * vec4(aPos.x, h, aPos.y, 1.0);
+      gl_Position = p;
+      gl_PointSize = uPx * (0.8 + s * 1.6 + lum * 0.6) / p.w;
+      vCol = aCol * (0.45 + 1.1 * s) + vec3(0.10, 0.28, 0.42) * s * 1.4;
+      vA = smoothstep(1.0, 0.72, r) * (0.22 + 0.5 * min(1.0, s * 1.6 + lum * 0.5));
+    }`;
+  const fs = `precision mediump float; varying vec3 vCol; varying float vA;
+    void main(){ vec2 d = gl_PointCoord - 0.5; float a = smoothstep(0.5, 0.05, length(d)); gl_FragColor = vec4(vCol, a * vA); }`;
+  try {
+    const p = gl.createProgram(); gl.attachShader(p, sh(gl.VERTEX_SHADER, vs)); gl.attachShader(p, sh(gl.FRAGMENT_SHADER, fs)); gl.linkProgram(p);
+    if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p));
+    ST.prog = p;
+  } catch (e) { console.warn('粒子舞台不可用', e); return false; }
+  ST.gl = gl; ST.buf = gl.createBuffer();
+  ST.specTex = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, ST.specTex);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.LUMINANCE, 128, 1, 0, gl.LUMINANCE, gl.UNSIGNED_BYTE, ST.specArr);
+  return true;
+}
+function stageBuild(imgOrCanvas) {   // 把图片采样成粒子:圆盘内 ~1 万个点
+  const gl = ST.gl; if (!gl) return;
+  const G = 112, c = document.createElement('canvas'); c.width = c.height = G; const x = c.getContext('2d');
+  try { x.drawImage(imgOrCanvas, 0, 0, G, G); } catch { return; }
+  let px; try { px = x.getImageData(0, 0, G, G).data; } catch { return; }
+  const out = [];
+  for (let j = 0; j < G; j++) for (let i = 0; i < G; i++) {
+    const u = (i + 0.5) / G * 2 - 1, v = (j + 0.5) / G * 2 - 1, r = Math.hypot(u, v); if (r > 1) continue;
+    const o = (j * G + i) * 4, jit = 0.6 / G;
+    out.push(u + (Math.random() - 0.5) * jit, v + (Math.random() - 0.5) * jit, px[o] / 255, px[o + 1] / 255, px[o + 2] / 255, Math.random());
+  }
+  ST.n = out.length / 6;
+  gl.bindBuffer(gl.ARRAY_BUFFER, ST.buf); gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(out), gl.STATIC_DRAW);
+}
+function stageSource(coverUrl) {   // 选择图片来源:自定义 > 封面 > 渐变
+  if (!ST.on || !stageInit()) return;
+  const src = ST.img || coverUrl || 'grad:' + ($('pTitle').textContent || '');
+  if (src === ST.src) return;
+  ST.src = src;
+  if (src.startsWith('grad:')) {
+    const c = document.createElement('canvas'); c.width = c.height = 64; const x = c.getContext('2d');
+    const g = x.createRadialGradient(32, 32, 2, 32, 32, 34); g.addColorStop(0, '#9be7ff'); g.addColorStop(0.5, '#3390ec'); g.addColorStop(1, '#0b1a33');
+    x.fillStyle = g; x.fillRect(0, 0, 64, 64); stageBuild(c); return;
+  }
+  const im = new Image(); im.crossOrigin = 'anonymous'; ST.loading = src;
+  im.onload = () => { if (ST.loading === src) stageBuild(im); };
+  im.onerror = () => { if (ST.loading === src) { ST.src = ''; stageSource(''); } };
+  im.src = src.startsWith('data:') ? src : src.replace(/param=\d+y\d+/, 'param=200y200');
+}
+function stageResize() {
+  if (!ST.gl) return;
+  const dpr = Math.min(2, devicePixelRatio || 1); ST.w = player.clientWidth; ST.h = player.clientHeight;
+  ST.cvs.width = ST.w * dpr; ST.cvs.height = ST.h * dpr; ST.gl.viewport(0, 0, ST.cvs.width, ST.cvs.height); ST.dpr = dpr;
+}
+addEventListener('resize', () => { if (!player.hidden) stageResize(); });
+function m4persp(fov, asp, n, f) { const t = 1 / Math.tan(fov / 2); return [t / asp, 0, 0, 0, 0, t, 0, 0, 0, 0, (f + n) / (n - f), -1, 0, 0, 2 * f * n / (n - f), 0]; }
+function m4look(e, c) {
+  let zx = e[0] - c[0], zy = e[1] - c[1], zz = e[2] - c[2], l = Math.hypot(zx, zy, zz); zx /= l; zy /= l; zz /= l;
+  let xx = zz, xy = 0, xz = -zx; l = Math.hypot(xx, xz) || 1; xx /= l; xz /= l;
+  const yx = zy * xz - zz * xy, yy = zz * xx - zx * xz, yz = zx * xy - zy * xx;
+  return [xx, yx, zx, 0, xy, yy, zy, 0, xz, yz, zz, 0, -(xx * e[0] + xy * e[1] + xz * e[2]), -(yx * e[0] + yy * e[1] + yz * e[2]), -(zx * e[0] + zy * e[1] + zz * e[2]), 1];
+}
+function m4mul(a, b) { const o = new Array(16); for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++) { let s = 0; for (let k = 0; k < 4; k++) s += a[k * 4 + j] * b[i * 4 + k]; o[i * 4 + j] = s; } return o; }
+function stageFrame(now, dt) {
+  if (!ST.on || !ST.gl || !ST.n) return;
+  const gl = ST.gl, t = now / 1000;
+  // 频谱:有音频分析用真实频谱,否则用柔和的模拟波动
+  if (FX.an && !restAudio.paused) FX.an.getByteFrequencyData(ST.specArr);
+  else for (let i = 0; i < 128; i++) ST.specArr[i] = ST.specArr[i] * 0.92 + (restAudio.paused ? 0 : (0.5 + 0.5 * Math.sin(t * 2 + i * 0.25)) * 60) * 0.08;
+  gl.bindTexture(gl.TEXTURE_2D, ST.specTex);
+  gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, 128, 1, gl.LUMINANCE, gl.UNSIGNED_BYTE, ST.specArr);
+  ST.rot += dt * (0.05 + FX.energy * 0.12);
+  const asp = ST.w / Math.max(1, ST.h), th = Math.tan(0.78 / 2), dist = Math.max(2.2, 0.98 / (th * Math.min(asp, 1.4)));   // 竖屏时退远,整盘可见
+  const ey = dist * 0.48, er = dist * 0.88;
+  const mvp = m4mul(m4persp(0.78, asp, 0.05, 20), m4look([Math.sin(ST.rot) * er, ey, Math.cos(ST.rot) * er], [0, 0.32, 0]));
+  gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT);
+  gl.useProgram(ST.prog); gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE);
+  gl.bindBuffer(gl.ARRAY_BUFFER, ST.buf);
+  const at = n => gl.getAttribLocation(ST.prog, n), un = n => gl.getUniformLocation(ST.prog, n);
+  gl.enableVertexAttribArray(at('aPos')); gl.vertexAttribPointer(at('aPos'), 2, gl.FLOAT, false, 24, 0);
+  gl.enableVertexAttribArray(at('aCol')); gl.vertexAttribPointer(at('aCol'), 3, gl.FLOAT, false, 24, 8);
+  gl.enableVertexAttribArray(at('aSeed')); gl.vertexAttribPointer(at('aSeed'), 1, gl.FLOAT, false, 24, 20);
+  gl.uniformMatrix4fv(un('uMVP'), false, new Float32Array(mvp));
+  gl.uniform1f(un('uTime'), t); gl.uniform1f(un('uBeat'), FX.energy); gl.uniform1f(un('uPx'), 2.6 * (ST.dpr || 1) * dist * Math.min(ST.w, ST.h) / 390);
+  gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, ST.specTex); gl.uniform1i(un('uSpec'), 0);
+  gl.drawArrays(gl.POINTS, 0, ST.n);
+}
+function stageApply() {
+  player.classList.toggle('stage-on', ST.on);
+  if (ST.on) { stageInit(); stageResize(); ST.src = ''; const it = curItem(); stageSource(it?.cover || ''); }
+  else if (ST.gl) { ST.gl.clearColor(0, 0, 0, 0); ST.gl.clear(ST.gl.COLOR_BUFFER_BIT); }
+}
+function stageCustomImage(file) {   // 导入背景图:缩到 256px 存本地
+  const fr = new FileReader();
+  fr.onload = () => {
+    const im = new Image();
+    im.onload = () => {
+      const S = 256, c = document.createElement('canvas'); c.width = c.height = S; const x = c.getContext('2d');
+      const k = Math.max(S / im.width, S / im.height), w = im.width * k, h = im.height * k; x.drawImage(im, (S - w) / 2, (S - h) / 2, w, h);
+      ST.img = c.toDataURL('image/jpeg', 0.85); lsSet('stageImg', ST.img); lsSet('stageImgBg', '1');
+      ST.src = ''; stageSource(''); $('pBg').style.backgroundImage = `url("${ST.img}")`; toast('已设为背景图', 1500); openLySheet();
+    };
+    im.src = fr.result;
+  };
+  fr.readAsDataURL(file);
+}
+
 // ---------- 歌词风格面板 ----------
 function openLySheet() {
   const box = $('lyBody');
   box.innerHTML = `<div class="sect" style="padding-top:0">歌词动画</div><div class="list">${Object.entries(LY_STYLES).map(([k, [n, d]]) =>
     `<label class="li"><span class="lt">${n}<small>${d}</small></span><input type="radio" name="lys" value="${k}" ${LYS.style === k ? 'checked' : ''}></label>`).join('')}</div>
+    <div class="sect">背景</div><div class="list">
+      <label class="li"><span class="lt">粒子舞台<small>用背景图生成粒子地形,随音乐频谱起伏旋转</small></span><input type="radio" name="lybg" value="stage" ${ST.on ? 'checked' : ''}></label>
+      <label class="li"><span class="lt">模糊封面<small>封面大面积模糊流动</small></span><input type="radio" name="lybg" value="blur" ${ST.on ? '' : 'checked'}></label></div>
+    <div class="sect">背景图片</div><div class="list">
+      <div class="li"><span class="ico" style="background:#223 center/cover url('${ST.img || curItem()?.cover || ''}')"></span><span class="lt">${ST.img ? '自定义图片' : '使用歌曲封面'}<small>${ST.img ? '所有歌曲都用这张图做背景' : '每首歌自动用自己的封面'}</small></span>
+        <button class="ib txt" id="stPick">${ST.img ? '更换' : '导入图片'}</button>${ST.img ? '<button class="ib txt" id="stReset">用封面</button>' : ''}</div></div>
+    <input type="file" id="stFile" accept="image/*" hidden>
     <div class="sect">效果</div><div class="list">
       <label class="li"><span class="lt">粒子特效<small>光尘漂浮、唱到的字迸出光点、换行时迸发,随音乐律动</small></span><input type="checkbox" class="sw" id="lyFxSw" ${LYS.fx ? 'checked' : ''}></label>
       <label class="li"><span class="lt">显示翻译<small>外文歌词下方显示中文翻译</small></span><input type="checkbox" class="sw" id="lyTrSw" ${LYS.tr ? 'checked' : ''}></label></div>`;
   box.querySelectorAll('input[name=lys]').forEach(r => r.onchange = () => { LYS.style = r.value; lsSet('lyStyle', r.value); renderLyrics(LY.lines.length ? '' : undefined); });
+  box.querySelectorAll('input[name=lybg]').forEach(r => r.onchange = () => { ST.on = r.value === 'stage'; lsSet('lyBg', r.value); stageApply(); });
+  $('stPick').onclick = () => $('stFile').click();
+  $('stFile').onchange = e => { const f = e.target.files[0]; if (f) stageCustomImage(f); };
+  if ($('stReset')) $('stReset').onclick = () => { ST.img = ''; lsSet('stageImg', ''); ST.src = ''; const it = curItem(); player.dataset.key = ''; syncPlayer(); stageSource(it?.cover || ''); openLySheet(); };
   $('lyFxSw').onchange = e => { LYS.fx = e.target.checked; lsSet('lyFx', LYS.fx ? '1' : '0'); if (!LYS.fx) FX.ps.length = 0; };
   $('lyTrSw').onchange = e => { LYS.tr = e.target.checked; lsSet('lyTr', LYS.tr ? '1' : '0'); applyLyStyle(); lyTick(true); };
   $('lySheet').hidden = false;
