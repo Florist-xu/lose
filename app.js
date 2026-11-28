@@ -488,7 +488,13 @@ $('btnStart').onclick = async () => {
 let USER = ''; try { USER = localStorage.getItem('user') || ''; } catch {}
 const USER_RE = /^[\w.\-\u4e00-\u9fa5]{1,20}$/;
 const _unusedUserIcon = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="vertical-align:-3px;margin-right:6px"><circle cx="12" cy="8" r="4"/><path d="M4 21c1-4 4.5-6 8-6s7 2 8 6"/></svg>';
-const showUser = () => { $('btnUser').innerHTML = USER ? `<span class="av">${esc([...USER][0].toUpperCase())}</span><span class="nm">${esc(USER)}</span>` : '<span class="av">?</span><span class="nm">登录</span>';  loadToday(); };
+const showUser = () => {
+  const me = self.ncmMe, b = $('btnUser');
+  b.innerHTML = (me?.avatar ? `<img class="av" src="${String(me.avatar).replace(/^http:/, 'https:')}?param=80y80" alt="">` : `<span class="av">${USER ? esc([...USER][0].toUpperCase()) : '?'}</span>`)
+    + (me?.vip ? '<i class="vb" aria-label="黑胶 VIP">V</i>' : '') + `<span class="nm">${USER ? esc(USER) : '登录'}</span>`;
+  b.title = (USER ? '训练账户:' + USER : '登录') + (me ? ' · 网易云:' + me.name : '');
+  loadToday();
+};
 const lock = on => { $('wsel').disabled = on; $('btnUser').disabled = on; };
 async function showLogin(canCancel) {
   let users = []; try { users = await (await fetch('api/users')).json(); } catch {}
@@ -509,7 +515,7 @@ async function showLogin(canCancel) {
   if ($('uCancel')) $('uCancel').onclick = closeModal;
   if (!USER) setTimeout(() => $('uName').focus(), 50);
 }
-$('btnUser').onclick = () => showLogin(!!USER);
+$('btnUser').onclick = () => USER ? openNcmLogin() : showLogin(false);
 // 识别灵敏度:分段控件 <-> 隐藏的 select(识别代码读取 select 的值)
 const sensSeg = $('sensSeg');
 const syncSens = () => sensSeg.querySelectorAll('button').forEach(x => x.classList.toggle('on', x.dataset.v === $('sens').value));
@@ -614,7 +620,7 @@ function toast(msg, ms = 2800) {
 const mNote = (t, cls = '') => { const e = $('mNote'); e.textContent = t; e.className = 'note ' + cls; };
 
 // ---------- 音乐页状态 ----------
-const MV = { pl: null, edit: false, q: '', sel: new Set(), mode: null, view: '', sq: '', sr: [], me: undefined, myPl: [], npl: null, nplItems: {}, importing: {} };
+const MV = { lib: 'pl', pl: null, edit: false, q: '', sel: new Set(), mode: null, view: '', sq: '', sr: [], me: undefined, myPl: [], npl: null, nplItems: {}, importing: {} };
 const PV = { ctx: [] };   // 试听的上下文(用于"下一首")
 const previewId = () => { const k = restAudio.dataset.prev || ''; return k.startsWith('l:') ? +k.slice(2) : null; };
 
@@ -630,7 +636,6 @@ async function openMusic() {
 }
 function bindMusicTop() {
   $('goSearch').onclick = () => { MV.view = 'search'; MV.edit = false; renderMusic(); scrollTo(0, 0); };
-  $('ncmRow').onclick = openNcmLogin;
   document.querySelectorAll('#pgMusic [data-npl]').forEach(b => b.onclick = () => { MV.view = 'npl'; MV.npl = +b.dataset.npl; MV.edit = false; renderMusic(); scrollTo(0, 0); });
 }
 function songRow(t, opt = {}) {
@@ -645,62 +650,59 @@ function songRow(t, opt = {}) {
 }
 function renderMusic() {
   const host = $('pgMusic');
-  $('btnEditMusic').hidden = !tracks.length || !!MV.pl || !!MV.view;
+  MV.lib ||= 'pl';
+  $('btnEditMusic').hidden = !tracks.length || !!MV.pl || !!MV.view || MV.lib !== 'song';
   if (MV.view === 'search') return renderSearch(host);
   if (MV.view === 'npl') return renderNetPlaylist(host);
   $('btnEditMusic').textContent = MV.edit ? '完成' : '编辑';
   if (MV.pl) return renderPlaylist(host, playlists.find(p => p.id === MV.pl));
-  const c = chosen(), real = c === 'all' ? 'all' : c.startsWith('playlist:') ? 'pl' : 'one', mode = MV.mode || real;
+  const c = chosen(), real = c === 'all' ? 'all' : c.startsWith('playlist:') ? 'pl' : 'one';
   const curPl = real === 'pl' ? playlists.find(p => 'playlist:' + p.id === c) : null;
   const curT = real === 'one' ? tracks.find(t => String(t.id) === c) : null;
-  let nowTitle = '随机播放', nowSub = `${tracks.length} 首${totalDur(tracks) ? ' · ' + totalDur(tracks) : ''}`, nowCover = `<span class="nc-ic">${IC.shuffle}</span>`, nowBg = 'linear-gradient(135deg,#3390ec,#20c997)';
-  if (curPl) { const a = plTracks(curPl); nowTitle = curPl.name; nowSub = `歌单 · ${a.length} 首${totalDur(a) ? ' · ' + totalDur(a) : ''} · 顺序播放`; nowCover = esc([...curPl.name][0] || '♪'); nowBg = grad(curPl.name); }
-  if (curT) { nowTitle = curT.title; nowSub = `单曲循环 · ${dur(curT.duration)}`; nowCover = `<span class="nc-ic">${IC.note}</span>`; nowBg = grad(curT.title); }
-  if (!tracks.length) {
-    host.innerHTML = `<div id="clipBanner" class="clip" hidden></div>
-    <button class="search sbig fake" id="goSearch">${IC.search}<span>搜索网易云歌曲</span></button>
-      <div class="empty"><div class="empty-ic">${IC.note}</div><b>还没有休息音乐</b><span>上传文件,或粘贴抖音 / 网易云歌单链接</span><button class="pri" id="emptyAdd">添加音乐</button></div>${myPlSection()}<div class="sect">网易云账号</div><div class="list"><button class="li" id="ncmRow"><span class="ico r">${IC.note}</span><span class="lt" id="ncmRowT">${MV.me ? esc(MV.me.name) : '登录网易云'}<small>${MV.me ? (MV.me.vip ? '黑胶 VIP · 可播放 VIP 歌曲' : '已登录') : '登录后可播放 VIP 歌曲(扫码 / 验证码)'}</small></span></button></div>`;
-    $('emptyAdd').onclick = openAdd; bindMusicTop(); return;
-  }
+  let nowTitle = '随机播放全部', nowSub = tracks.length ? `${tracks.length} 首${totalDur(tracks) ? ' · ' + totalDur(tracks) : ''}` : '还没有休息音乐', nowCover = `<span class="nc-ic">${IC.shuffle}</span>`, nowBg = 'linear-gradient(135deg,#3390ec,#20c997)';
+  if (curPl) { const a = plTracks(curPl); nowTitle = curPl.name; nowSub = `歌单顺序播放 · ${a.length} 首${totalDur(a) ? ' · ' + totalDur(a) : ''}`; nowCover = esc([...curPl.name][0] || '♪'); nowBg = grad(curPl.name); }
+  if (curT) { const it = itemLocal(curT); nowTitle = curT.title; nowSub = `单曲循环 · ${dur(curT.duration)}`; nowCover = it.cover ? '' : `<span class="nc-ic">${IC.note}</span>`; nowBg = it.cover ? `center/cover url('${it.cover}')` : grad(curT.title); }
+  const oneMode = MV.mode === 'one';
   const q = MV.q.trim().toLowerCase(), list = q ? tracks.filter(t => t.title.toLowerCase().includes(q)) : tracks;
-  host.innerHTML = `<div id="clipBanner" class="clip" hidden></div>
-    <button class="search sbig fake" id="goSearch">${IC.search}<span>搜索网易云歌曲</span></button>
-    <div class="nowCard glass">
-      <div class="nc-cover" style="background:${nowBg}">${nowCover}</div>
-      <div class="lt"><span class="nc-k">休息时播放</span>${esc(nowTitle)}<small>${nowSub}</small></div>
-      <button class="nc-play" id="nowPlay" aria-label="试听">${IC.play}</button>
-    </div>
-    <div class="seg modeSeg" id="modeSeg">
-      <button data-mode="all" class="${mode === 'all' ? 'on' : ''}">随机</button>
-      <button data-mode="pl" class="${mode === 'pl' ? 'on' : ''}">歌单</button>
-      <button data-mode="one" class="${mode === 'one' ? 'on' : ''}">单曲</button>
-    </div>
-    ${playlists.length ? `<div class="sect">歌单 · ${playlists.length}</div>
-    <div class="plrow">${playlists.map(p => { const a = plTracks(p); return `<button class="plcard" data-pl="${p.id}">
+  const plCard = p => { const a = plTracks(p); return `<button class="plcard" data-pl="${p.id}">
       <span class="plcover" style="background:${grad(p.name)}">${esc([...p.name][0] || '♪')}${curPl?.id === p.id ? `<i class="chk">${IC.check}</i>` : ''}</span>
-      <span class="t">${esc(p.name)}</span><span class="s">${a.length} 首${totalDur(a) ? ' · ' + totalDur(a) : ''}</span></button>`; }).join('')}</div>`
-    : mode === 'pl' ? `<div class="sect">歌单</div><div class="plempty glass"><b>还没有歌单</b><span>复制网易云歌单的分享链接,回到这里即可一键导入</span><button class="pri" id="plImport">导入网易云歌单</button></div>` : ''}
-    ${myPlSection()}
-    <div class="sect">全部歌曲 · ${tracks.length}${mode === 'one' && !MV.edit ? '<span class="sect-r">选中 = 单曲循环</span>' : ''}</div>
+      <span class="t">${esc(p.name)}</span><span class="s">${a.length} 首${totalDur(a) ? ' · ' + totalDur(a) : ''}</span></button>`; };
+  const npCard = p => `<button class="plcard" data-npl="${p.id}"><span class="plcover img" style="background-image:url('${p.cover}')">${p.like ? '<i class="heart">♥</i>' : ''}</span>
+      <span class="t">${esc(p.name)}</span><span class="s">${p.count} 首${p.mine ? '' : ' · 收藏'}</span></button>`;
+  const plTab = `
+    <div class="sect">休息音乐歌单${playlists.length ? ' · ' + playlists.length : ''}</div>
+    ${playlists.length ? `<div class="plgrid">${playlists.map(plCard).join('')}</div>`
+      : `<div class="list"><button class="li" id="plImport"><span class="ico">${PIC.plus}</span><span class="lt">还没有歌单<small>从下方网易云歌单导入,或粘贴歌单链接</small></span></button></div>`}
+    <div class="sect">我的网易云歌单${MV.myPl.length ? ' · ' + MV.myPl.length : ''}</div>
+    ${MV.me ? (MV.myPl.length ? `<div class="plgrid">${MV.myPl.map(npCard).join('')}</div>` : '<div class="hint">正在同步网易云歌单…</div>')
+      : `<div class="list"><button class="li" id="ncmLoginRow"><span class="ico r">${IC.note}</span><span class="lt">登录网易云<small>同步你的歌单,VIP 歌曲也能播放</small></span></button></div>`}`;
+  const songTab = !tracks.length
+    ? `<div class="empty"><div class="empty-ic">${IC.note}</div><b>还没有休息音乐</b><span>搜索网易云歌曲,或上传 / 粘贴链接添加</span><button class="pri" id="emptyAdd">添加音乐</button></div>`
+    : `${oneMode ? '<div class="clip" style="background:#22456b"><span class="lt">选一首作为休息时单曲循环<small>点歌曲前面的圆点</small></span><button class="ib" id="oneCancel" aria-label="取消">' + IC.close + '</button></div>' : ''}
     ${tracks.length > 10 ? `<label class="search">${IC.search}<input id="mSearch" type="text" placeholder="在已添加的歌曲中筛选" value="${esc(MV.q)}" autocomplete="off"></label>` : ''}
     ${MV.edit ? `<div class="editbar"><span>已选 ${MV.sel.size} 首</span><button id="selAll">${MV.sel.size === list.length ? '全不选' : '全选'}</button><button class="danger" id="delSel" ${MV.sel.size ? '' : 'disabled'}>删除所选</button><button class="danger" id="delAll">全部删除</button></div>` : ''}
-    <div class="list songs" id="songList">${list.map(t => songRow(t, { radio: mode === 'one' ? curT?.id ?? -1 : 0 })).join('') || '<div class="li"><span class="sub">没有匹配的歌曲</span></div>'}</div>
-    ${MV.edit ? '' : '<div class="hint">点歌曲试听,点底部播放条可打开歌词页;向左滑动可删除。</div>'}
-    <div class="sect">网易云账号</div><div class="list"><button class="li" id="ncmRow"><span class="ico r">${IC.note}</span><span class="lt" id="ncmRowT">${MV.me ? esc(MV.me.name) : '登录网易云'}<small>${MV.me ? (MV.me.vip ? '黑胶 VIP · 可播放 VIP 歌曲' : '已登录') : '登录后可播放 VIP 歌曲(扫码 / 验证码)'}</small></span></button></div>`;
+    <div class="list songs" id="songList">${list.map(t => songRow(t, { radio: oneMode ? curT?.id ?? -1 : 0 })).join('') || '<div class="li"><span class="sub">没有匹配的歌曲</span></div>'}</div>
+    ${MV.edit || oneMode ? '' : '<div class="hint">点歌曲试听,点底部播放条打开歌词页;向左滑动可删除。</div>'}`;
+  host.innerHTML = `<div id="clipBanner" class="clip" hidden></div>
+    <button class="search sbig fake" id="goSearch">${IC.search}<span>搜索网易云歌曲</span></button>
+    <div class="nowCard glass" id="nowCard" role="button" aria-label="更换休息时播放的内容">
+      <div class="nc-cover" style="background:${nowBg}">${nowCover}</div>
+      <div class="lt"><span class="nc-k">休息时播放 · 点击更换</span>${esc(nowTitle)}<small>${nowSub}</small></div>
+      <button class="nc-play" id="nowPlay" aria-label="试听">${IC.play}</button>
+    </div>
+    <div class="seg libSeg"><button data-lib="pl" class="${MV.lib === 'pl' ? 'on' : ''}">歌单</button><button data-lib="song" class="${MV.lib === 'song' ? 'on' : ''}">歌曲${tracks.length ? ' · ' + tracks.length : ''}</button></div>
+    ${MV.lib === 'pl' ? plTab : songTab}`;
   bindMusicTop();
+  host.querySelectorAll('[data-lib]').forEach(b => b.onclick = () => { MV.lib = b.dataset.lib; MV.edit = false; MV.sel.clear(); if (MV.lib === 'pl') MV.mode = null; renderMusic(); });
   if ($('plImport')) $('plImport').onclick = openAdd;
+  if ($('emptyAdd')) $('emptyAdd').onclick = openAdd;
+  if ($('ncmLoginRow')) $('ncmLoginRow').onclick = openNcmLogin;
+  if ($('oneCancel')) $('oneCancel').onclick = () => { MV.mode = null; renderMusic(); };
+  $('nowCard').onclick = e => { if (!e.target.closest('#nowPlay')) openModeSheet(); };
   $('nowPlay').onclick = () => { const ctx = curPl ? plTracks(curPl) : curT ? [curT] : [...tracks].sort(() => Math.random() - 0.5); if (ctx.length) previewTrack(ctx[0].id, ctx.map(t => t.id)); };
-  host.querySelectorAll('[data-mode]').forEach(b => b.onclick = () => {
-    const m = b.dataset.mode;
-    MV.mode = null;
-    if (m === 'all') setChosen('all');
-    else if (m === 'pl') { if (!playlists.length) MV.mode = 'pl'; else if (!curPl) setChosen('playlist:' + playlists[0].id); }
-    else if (!curT && tracks[0]) setChosen(String(tracks[0].id));
-    renderMusic();
-  });
   host.querySelectorAll('[data-pl]').forEach(b => b.onclick = () => { MV.pl = +b.dataset.pl; MV.edit = false; renderMusic(); scrollTo(0, 0); });
   if ($('mSearch')) $('mSearch').oninput = e => { MV.q = e.target.value; const pos = e.target.selectionStart; renderMusic(); const s = $('mSearch'); s.focus(); try { s.setSelectionRange(pos, pos); } catch {} };
-  if (MV.edit) {
+  if (MV.edit && $('selAll')) {
     $('selAll').onclick = () => { if (MV.sel.size === list.length) MV.sel.clear(); else list.forEach(t => MV.sel.add(t.id)); renderMusic(); };
     $('delSel').onclick = async () => {
       if (!confirm(`删除所选的 ${MV.sel.size} 首歌曲?无法恢复。`)) return;
@@ -713,7 +715,23 @@ function renderMusic() {
       blobCache.forEach(u => URL.revokeObjectURL(u)); blobCache.clear(); setChosen('all'); MV.edit = false; MV.sel.clear(); await openMusic(); toast('已全部删除');
     };
   }
-  bindSongList(host, list.map(t => t.id));
+  if ($('songList')) bindSongList(host, list.map(t => t.id));
+  if (oneMode) host.querySelectorAll('[data-one]').forEach(r => r.addEventListener('change', () => { MV.mode = null; toast('已设为单曲循环', 1500); }));
+}
+// 休息时播放:选择 随机全部 / 某个歌单 / 单曲循环
+function openModeSheet() {
+  const c = chosen(), box = $('modeBody');
+  box.innerHTML = `<div class="list">
+    <label class="li"><span class="ico g">${IC.shuffle}</span><span class="lt">随机播放全部<small>${tracks.length} 首,休息时随机选歌</small></span><input type="radio" name="msel" value="all" ${c === 'all' ? 'checked' : ''}></label>
+    ${playlists.map(p => `<label class="li"><span class="ico" style="background:${grad(p.name)}">${esc([...p.name][0] || '♪')}</span><span class="lt">${esc(p.name)}<small>歌单 · ${plTracks(p).length} 首 · 顺序播放</small></span><input type="radio" name="msel" value="playlist:${p.id}" ${c === 'playlist:' + p.id ? 'checked' : ''}></label>`).join('')}
+    <label class="li"><span class="ico o">${IC.note}</span><span class="lt">单曲循环<small>${c !== 'all' && !c.startsWith('playlist:') ? esc(tracks.find(t => String(t.id) === c)?.title || '') : '在歌曲列表里选一首'}</small></span><input type="radio" name="msel" value="one" ${c !== 'all' && !c.startsWith('playlist:') ? 'checked' : ''}></label>
+  </div>${playlists.length ? '' : '<div class="hint">导入歌单后,也可以选择按歌单顺序播放。</div>'}`;
+  box.querySelectorAll('input[name=msel]').forEach(r => r.onchange = () => {
+    $('modeSheet').hidden = true;
+    if (r.value === 'one') { if (!tracks.length) return toast('还没有歌曲'); MV.mode = 'one'; MV.lib = 'song'; renderMusic(); return; }
+    MV.mode = null; setChosen(r.value); renderMusic(); toast('已更换休息时播放', 1500);
+  });
+  $('modeSheet').hidden = false;
 }
 function renderPlaylist(host, p) {
   const a = plTracks(p), using = chosen() === 'playlist:' + p.id;
@@ -1104,21 +1122,25 @@ async function renderSearch(host) {
 // ---------- 网易云账号(扫码 / 验证码登录,用于 VIP 歌曲) ----------
 const ncmSheet = $('ncmSheet');
 async function ncmStatus() {
-  if (!lsGet('ncmCookie')) return null;
-  try { const j = await ncm('/login/status', { timestamp: Date.now() }); const p = j.data?.profile || j.profile; return p ? { uid: p.userId, name: p.nickname, avatar: p.avatarUrl, vip: (j.data?.account?.vipType || 0) > 0 } : null; } catch { return null; }
+  if (!lsGet('ncmCookie')) { self.ncmMe = null; showUser(); return null; }
+  try { const j = await ncm('/login/status', { timestamp: Date.now() }); const p = j.data?.profile || j.profile; self.ncmMe = p ? { uid: p.userId, name: p.nickname, avatar: p.avatarUrl, vip: (j.data?.account?.vipType || 0) > 0 } : null; } catch { self.ncmMe = null; }
+  showUser(); return self.ncmMe;
 }
 let qrTimer = null;
+function bindAcct() { $('acSwitch').onclick = () => { ncmSheet.hidden = true; clearInterval(qrTimer); showLogin(true); }; }
 async function openNcmLogin() {
   ncmSheet.hidden = false; clearInterval(qrTimer);
   const box = $('ncmBody'); box.innerHTML = '<div class="hint" style="text-align:center;padding:20px">加载中…</div>';
   const me = await ncmStatus();
   if (me) {
-    box.innerHTML = `<div class="ncmMe"><img src="${coverOf(me.avatar, 120)}" alt=""><b>${esc(me.name)}</b><span>${me.vip ? '黑胶 VIP · 可播放 VIP 歌曲' : '普通账号'}</span></div>
+    box.innerHTML = `<div class="sect" style="padding-top:0">训练账户</div><div class="list"><div class="li"><span class="av lg">${esc([...USER][0]?.toUpperCase() || '?')}</span><span class="lt">${esc(USER)}<small>训练记录按用户名保存</small></span><button class="ib txt" id="acSwitch">切换</button></div></div><div class="sect">网易云音乐</div>` + `<div class="ncmMe"><img src="${coverOf(me.avatar, 120)}" alt=""><b>${esc(me.name)}</b><span>${me.vip ? '黑胶 VIP · 可播放 VIP 歌曲' : '普通账号'}</span></div>
       <div class="btns"><button class="danger" id="ncmOut">退出网易云登录</button></div>`;
-    $('ncmOut').onclick = async () => { try { await ncm('/logout'); } catch {} lsSet('ncmCookie', ''); ncmSheet.hidden = true; toast('已退出网易云'); MV.me = null; MV.myPl = []; if (TAB === 'music') renderMusic(); };
+    bindAcct();
+    $('ncmOut').onclick = async () => { try { await ncm('/logout'); } catch {} lsSet('ncmCookie', ''); ncmSheet.hidden = true; toast('已退出网易云'); MV.me = null; MV.myPl = []; self.ncmMe = null; showUser(); if (TAB === 'music') renderMusic(); };
     return;
   }
-  box.innerHTML = `<div class="seg ncmSeg"><button class="on" data-lg="qr">扫码登录</button><button data-lg="sms">验证码登录</button></div><div id="ncmPane"></div>`;
+  box.innerHTML = `<div class="sect" style="padding-top:0">训练账户</div><div class="list"><div class="li"><span class="av lg">${esc([...USER][0]?.toUpperCase() || '?')}</span><span class="lt">${esc(USER)}<small>训练记录按用户名保存</small></span><button class="ib txt" id="acSwitch">切换</button></div></div><div class="sect">网易云音乐</div>` + `<div class="seg ncmSeg"><button class="on" data-lg="qr">扫码登录</button><button data-lg="sms">验证码登录</button></div><div id="ncmPane"></div>`;
+  bindAcct();
   const pane = $('ncmPane');
   const showQr = async () => {
     pane.innerHTML = '<div class="hint" style="text-align:center;padding:20px">生成二维码…</div>';
@@ -1283,6 +1305,7 @@ if (window.webkit?.messageHandlers?.app) {
   setSheet.querySelector('.prefs').appendChild(row);
 }
 
+ncmStatus();
 init().then(() => { const h = location.hash.slice(1); if (TABS[h] && h !== 'train') switchTab(h); });
 if (!USER) showLogin(false);
 requestAnimationFrame(loop);

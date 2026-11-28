@@ -511,6 +511,24 @@ body.miniOn .app{padding-bottom:calc(170px + env(safe-area-inset-bottom))}
 .plcover.img{background:#223 center/cover no-repeat;font-size:0}
 .plcover .heart{position:absolute;left:8px;bottom:8px;width:26px;height:26px;border-radius:50%;display:grid;place-items:center;font-size:14px;font-style:normal;color:#fff;background:#e5484d}
 .srow.net .lt small{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+/* ===================== v8:音乐页整理 + 头像 ===================== */
+#btnUser.gbtn{position:relative;width:42px;padding:0;justify-content:center;overflow:visible}
+#btnUser .nm{display:none}
+#btnUser img.av{width:34px;height:34px;border-radius:50%;object-fit:cover;display:block}
+#btnUser .vb{position:absolute;right:-2px;bottom:-2px;width:17px;height:17px;border-radius:50%;display:grid;place-items:center;font-size:10px;font-weight:800;font-style:normal;color:#fff;background:linear-gradient(135deg,#ff5f6d,#e5484d);box-shadow:0 0 0 2px #0e1621}
+.av.lg{width:38px;height:38px;font-size:16px}
+.libSeg{display:grid;grid-template-columns:1fr 1fr;padding:4px;border-radius:14px;background:rgba(26,36,49,.55);box-shadow:var(--glassedge)}
+.libSeg button{padding:9px;font-size:15px;font-weight:600;border-radius:10px}
+.nowCard{cursor:pointer}
+.nc-k{opacity:.95}
+.plgrid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px 12px}
+@media(min-width:600px){.plgrid{grid-template-columns:repeat(4,minmax(0,1fr))}}
+.plgrid .plcard{width:auto}
+.plgrid .plcover{width:100%;height:auto;aspect-ratio:1;font-size:38px;border-radius:16px}
+.plgrid .plcard .s{font-size:11px}
+.plgrid .plcard .t{font-size:13px;margin-top:6px}
+#modeSheet .li{cursor:pointer}
 </style>
 </head>
 <body data-tab="train">
@@ -613,8 +631,12 @@ body.miniOn .app{padding-bottom:calc(170px + env(safe-area-inset-bottom))}
   </div>
 </div>
 <div class="sheet" id="ncmSheet" hidden><div class="sheetBox" role="dialog" aria-modal="true" aria-label="网易云账号">
-  <div class="sheetHead"><b>网易云账号</b><button id="ncmDone" class="txtbtn">完成</button></div>
+  <div class="sheetHead"><b>账户</b><button id="ncmDone" class="txtbtn">完成</button></div>
   <div id="ncmBody"></div>
+</div></div>
+<div class="sheet" id="modeSheet" hidden><div class="sheetBox" role="dialog" aria-modal="true" aria-label="休息时播放">
+  <div class="sheetHead"><b>休息时播放</b><button class="txtbtn" onclick="this.closest('.sheet').hidden=true">完成</button></div>
+  <div id="modeBody"></div>
 </div></div>
 <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 <nav class="tabbar" id="tabbar" aria-label="主导航"><span class="lens" aria-hidden="true"></span>
