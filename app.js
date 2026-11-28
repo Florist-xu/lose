@@ -276,7 +276,7 @@ function showSavePrompt() {
 }
 let relaxTimer = null, relaxUntil = 0;
 function startRelax() {
-  if (!tracks.length) return false;
+  if (!tracks.length && !isNcmRest()) return false;
   relaxUntil = Date.now() + 180000; restAudio.muted = false;
   restAudio.play().catch(() => {});
   clearTimeout(relaxTimer); relaxTimer = setTimeout(stopRelax, 180000);
@@ -551,8 +551,42 @@ function pickTrack(forceAll) {
   const pool = tracks.length > 1 ? tracks.filter(x => x.id !== lastTrackId) : tracks;
   return pool[Math.floor(Math.random() * pool.length)];
 }
+// 网易云歌单作为休息音乐:chosen = 'ncm:<歌单id>',每次休息按歌单顺序取下一首,播放地址现取(约 20 分钟过期)
+const NR = { pid: null, list: [], i: -1, cur: null };
+const isNcmRest = () => chosen().startsWith('ncm:');
+async function ncmRestList(pid) {
+  if (NR.pid !== pid || !NR.list.length) {
+    const j = await ncm('/playlist/track/all', { id: pid, limit: 1000 });
+    NR.pid = pid; NR.list = (j.songs || []).map(itemNet); NR.i = +lsGet('restNcmIdx:' + pid, '-1');
+  }
+  return NR.list;
+}
+async function prepNcmRest(pid) {
+  const list = await ncmRestList(pid);
+  for (let n = 0; n < Math.min(8, list.length); n++) {   // 遇到无版权/试听片段就跳过,最多试 8 首
+    NR.i = (NR.i + 1) % list.length; lsSet('restNcmIdx:' + pid, String(NR.i));
+    const it = list[NR.i], d = (await ncm('/song/url/v1', { id: it.nid, level: 'exhigh' })).data?.[0];
+    if (d?.url && !d.freeTrialInfo) {
+      if (restAudio.dataset.prev) return;
+      restAudio.src = https_(d.url); restAudio.loop = false; restAudio.dataset.ncm = it.nid; restAudio.dataset.urlAt = Date.now(); NR.cur = it; lastTrackId = null; return;
+    }
+  }
+  throw new Error('歌单里没有可播放的歌曲');
+}
+async function freshNcmUrl(resume) {   // 播放地址过期时重新获取并回到原位置
+  const nid = restAudio.dataset.ncm; if (!nid) return;
+  const pos = restAudio.currentTime || restPos.t;
+  const d = (await ncm('/song/url/v1', { id: nid, level: 'exhigh' })).data?.[0]; if (!d?.url) return;
+  restAudio.src = https_(d.url); restAudio.dataset.urlAt = Date.now();
+  await new Promise(r => { restAudio.addEventListener('loadedmetadata', r, { once: true }); setTimeout(r, 4000); });
+  try { restAudio.currentTime = pos; } catch {}
+  restPos = { src: restAudio.src, t: pos };
+  if (resume) restAudio.play().catch(() => {});
+}
 async function prepareRest(forceAll = false) {
   if (restAudio.dataset.prev) return; // 音乐页正在试听,不打断
+  if (isNcmRest()) { try { await prepNcmRest(chosen().slice(4)); } catch (e) { console.warn('网易云休息音乐加载失败', e); } return; }
+  delete restAudio.dataset.ncm;
   const t = pickTrack(forceAll);
   if (!t) { restAudio.removeAttribute('src'); restAudio.load(); return; }
   try { restAudio.src = await trackURL(t); lastTrackId = t.id; restAudio.loop = !forceAll && chosen() !== 'all' && !chosen().startsWith('playlist:'); } catch (e) { console.warn('休息音乐加载失败', e); }
@@ -566,6 +600,7 @@ async function loadTracks() {
 }
 // 休息结束时暂停并记住进度,下次休息从断点继续(同一首歌),而不是重新开始
 let restPos = { src: '', t: 0 };
+restAudio.addEventListener('error', () => { if (!restAudio.dataset.prev && isNcmRest() && restAudio.dataset.ncm) freshNcmUrl(S.phase === 'rest' && S.groupBreak && !S.paused).catch(() => {}); });
 restAudio.addEventListener('pause', () => { if (!restAudio.ended && restAudio.currentTime > 0.5) restPos = { src: restAudio.src, t: restAudio.currentTime }; });
 // 休息音乐进度条:训练中常驻在画面顶部,▶(绿)=正在播放,⏸=已暂停,一眼看出是否暂停
 const mbar = $('musicBar'), mm = t => Math.floor(t / 60) + ':' + String(Math.floor(t % 60)).padStart(2, '0');
@@ -581,7 +616,8 @@ function syncMusicBar() {
 }
 ['timeupdate', 'play', 'pause', 'loadedmetadata', 'emptied'].forEach(ev => restAudio.addEventListener(ev, syncMusicBar));
 function playRestMusic() {
-  if (!tracks.length) { $('bigS').textContent += '(还没有休息音乐,训练结束后可在页头「休息音乐」里添加)'; return; }
+  if (isNcmRest() && restAudio.dataset.ncm && Date.now() - (+restAudio.dataset.urlAt || 0) > 15 * 60e3) { freshNcmUrl(true); return; }
+  if (!tracks.length && !isNcmRest()) { $('bigS').textContent += '(还没有休息音乐,训练结束后可在页头「休息音乐」里添加)'; return; }
   restAudio.muted = false;
   if (restPos.src === restAudio.src && restAudio.currentTime < restPos.t - 1) { try { restAudio.currentTime = restPos.t; } catch {} }
   restAudio.play().catch(() => setMsg('休息音乐被浏览器拦截,点一下"音乐"按钮开启', 'bad'));
@@ -658,16 +694,20 @@ function renderMusic() {
   if (MV.pl) return renderPlaylist(host, playlists.find(p => p.id === MV.pl));
   const c = chosen(), real = c === 'all' ? 'all' : c.startsWith('playlist:') ? 'pl' : 'one';
   const curPl = real === 'pl' ? playlists.find(p => 'playlist:' + p.id === c) : null;
-  const curT = real === 'one' ? tracks.find(t => String(t.id) === c) : null;
+  const curT = real === 'one' && !c.startsWith('ncm:') ? tracks.find(t => String(t.id) === c) : null;
   let nowTitle = '随机播放全部', nowSub = tracks.length ? `${tracks.length} 首${totalDur(tracks) ? ' · ' + totalDur(tracks) : ''}` : '还没有休息音乐', nowCover = `<span class="nc-ic">${IC.shuffle}</span>`, nowBg = 'linear-gradient(135deg,#3390ec,#20c997)';
   if (curPl) { const a = plTracks(curPl); nowTitle = curPl.name; nowSub = `歌单顺序播放 · ${a.length} 首${totalDur(a) ? ' · ' + totalDur(a) : ''}`; nowCover = esc([...curPl.name][0] || '♪'); nowBg = grad(curPl.name); }
+  if (real === 'one' && c.startsWith('ncm:')) {
+    const cover = lsGet('restNcmCover'); nowTitle = lsGet('restNcmName', '网易云歌单'); nowSub = '网易云歌单 · 在线播放';
+    nowCover = cover ? '' : `<span class="nc-ic">${IC.note}</span>`; nowBg = cover ? `center/cover url('${cover}')` : grad(nowTitle);
+  }
   if (curT) { const it = itemLocal(curT); nowTitle = curT.title; nowSub = `单曲循环 · ${dur(curT.duration)}`; nowCover = it.cover ? '' : `<span class="nc-ic">${IC.note}</span>`; nowBg = it.cover ? `center/cover url('${it.cover}')` : grad(curT.title); }
   const oneMode = MV.mode === 'one';
   const q = MV.q.trim().toLowerCase(), list = q ? tracks.filter(t => t.title.toLowerCase().includes(q)) : tracks;
   const plCard = p => { const a = plTracks(p); return `<button class="plcard" data-pl="${p.id}">
       <span class="plcover" style="background:${grad(p.name)}">${esc([...p.name][0] || '♪')}${curPl?.id === p.id ? `<i class="chk">${IC.check}</i>` : ''}</span>
       <span class="t">${esc(p.name)}</span><span class="s">${a.length} 首${totalDur(a) ? ' · ' + totalDur(a) : ''}</span></button>`; };
-  const npCard = p => `<button class="plcard" data-npl="${p.id}"><span class="plcover img" style="background-image:url('${p.cover}')">${p.like ? '<i class="heart">♥</i>' : ''}</span>
+  const npCard = p => `<button class="plcard" data-npl="${p.id}"><span class="plcover img" style="background-image:url('${p.cover}')">${p.like ? '<i class="heart">♥</i>' : ''}${c === 'ncm:' + p.id ? `<i class="chk">${IC.check}</i>` : ''}</span>
       <span class="t">${esc(p.name)}</span><span class="s">${p.count} 首${p.mine ? '' : ' · 收藏'}</span></button>`;
   const plTab = `
     <div class="sect">休息音乐歌单${playlists.length ? ' · ' + playlists.length : ''}</div>
@@ -699,7 +739,10 @@ function renderMusic() {
   if ($('ncmLoginRow')) $('ncmLoginRow').onclick = openNcmLogin;
   if ($('oneCancel')) $('oneCancel').onclick = () => { MV.mode = null; renderMusic(); };
   $('nowCard').onclick = e => { if (!e.target.closest('#nowPlay')) openModeSheet(); };
-  $('nowPlay').onclick = () => { const ctx = curPl ? plTracks(curPl) : curT ? [curT] : [...tracks].sort(() => Math.random() - 0.5); if (ctx.length) previewTrack(ctx[0].id, ctx.map(t => t.id)); };
+  $('nowPlay').onclick = async () => {
+    if (c.startsWith('ncm:')) { try { const l = await ncmRestList(c.slice(4)); if (l.length) playItem(l[Math.max(0, NR.i)] || l[0], l); } catch (e) { toast('加载失败:' + e.message); } return; }
+    const ctx = curPl ? plTracks(curPl) : curT ? [curT] : [...tracks].sort(() => Math.random() - 0.5); if (ctx.length) previewTrack(ctx[0].id, ctx.map(t => t.id));
+  };
   host.querySelectorAll('[data-pl]').forEach(b => b.onclick = () => { MV.pl = +b.dataset.pl; MV.edit = false; renderMusic(); scrollTo(0, 0); });
   if ($('mSearch')) $('mSearch').oninput = e => { MV.q = e.target.value; const pos = e.target.selectionStart; renderMusic(); const s = $('mSearch'); s.focus(); try { s.setSelectionRange(pos, pos); } catch {} };
   if (MV.edit && $('selAll')) {
@@ -724,11 +767,13 @@ function openModeSheet() {
   box.innerHTML = `<div class="list">
     <label class="li"><span class="ico g">${IC.shuffle}</span><span class="lt">随机播放全部<small>${tracks.length} 首,休息时随机选歌</small></span><input type="radio" name="msel" value="all" ${c === 'all' ? 'checked' : ''}></label>
     ${playlists.map(p => `<label class="li"><span class="ico" style="background:${grad(p.name)}">${esc([...p.name][0] || '♪')}</span><span class="lt">${esc(p.name)}<small>歌单 · ${plTracks(p).length} 首 · 顺序播放</small></span><input type="radio" name="msel" value="playlist:${p.id}" ${c === 'playlist:' + p.id ? 'checked' : ''}></label>`).join('')}
-    <label class="li"><span class="ico o">${IC.note}</span><span class="lt">单曲循环<small>${c !== 'all' && !c.startsWith('playlist:') ? esc(tracks.find(t => String(t.id) === c)?.title || '') : '在歌曲列表里选一首'}</small></span><input type="radio" name="msel" value="one" ${c !== 'all' && !c.startsWith('playlist:') ? 'checked' : ''}></label>
-  </div>${playlists.length ? '' : '<div class="hint">导入歌单后,也可以选择按歌单顺序播放。</div>'}`;
+    ${MV.myPl.length ? `</div><div class="sect">网易云歌单 · 在线播放</div><div class="list">${MV.myPl.map(p => `<label class="li"><span class="ico" style="background:#223 center/cover url('${p.cover}')"></span><span class="lt">${esc(p.name)}<small>${p.count} 首 · 按歌单顺序 · 需联网</small></span><input type="radio" name="msel" value="ncm:${p.id}" ${c === 'ncm:' + p.id ? 'checked' : ''}></label>`).join('')}</div><div class="sect">其他</div><div class="list">` : ''}
+    <label class="li"><span class="ico o">${IC.note}</span><span class="lt">单曲循环<small>${c !== 'all' && !c.startsWith('playlist:') && !c.startsWith('ncm:') ? esc(tracks.find(t => String(t.id) === c)?.title || '') : '在歌曲列表里选一首'}</small></span><input type="radio" name="msel" value="one" ${c !== 'all' && !c.startsWith('playlist:') && !c.startsWith('ncm:') ? 'checked' : ''}></label>
+  </div>${MV.me ? '<div class="hint">网易云歌单不用下载,休息时在线播放;网络不好时建议在歌单详情里"导入为休息音乐"。</div>' : '<div class="hint">登录网易云(点右上角头像)后,可以直接选你的网易云歌单。</div>'}`;
   box.querySelectorAll('input[name=msel]').forEach(r => r.onchange = () => {
     $('modeSheet').hidden = true;
     if (r.value === 'one') { if (!tracks.length) return toast('还没有歌曲'); MV.mode = 'one'; MV.lib = 'song'; renderMusic(); return; }
+    if (r.value.startsWith('ncm:')) { const p = MV.myPl.find(x => 'ncm:' + x.id === r.value); lsSet('restNcmName', p?.name || ''); lsSet('restNcmCover', p?.cover || ''); }
     MV.mode = null; setChosen(r.value); renderMusic(); toast('已更换休息时播放', 1500);
   });
   $('modeSheet').hidden = false;
