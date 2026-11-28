@@ -10,6 +10,7 @@ from urllib.parse import urlparse, parse_qs, urljoin, unquote
 ROOT = os.path.dirname(os.path.abspath(__file__))
 PORT = int(os.environ.get('PORT', 6060))
 SPORT = int(os.environ.get('SPORT', 6061))
+NCM_LOCAL = os.environ.get('NCM_LOCAL', '').strip().rstrip('/')    # 可选:本机 netease-api 地址(start.sh 自动设置),用于加速网易云接口
 PARSER_URL = os.environ.get('PARSER_URL', '').strip().rstrip('/')  # 可选:media-parser 服务地址,用于解析抖音等分享链接
 DB_PATH = os.environ.get('DB_PATH', os.path.join(ROOT, 'data', 'workout.db'))
 MAX_BODY = 20 * 1024 * 1024
@@ -563,6 +564,39 @@ class H(SimpleHTTPRequestHandler):
         u = urlparse(self.path)
         parts = [p for p in u.path.split('/') if p]  # ['api', ...]
         try:
+            if method == 'GET' and parts == ['api', 'ncm-status']:   # 前端据此决定走本机还是 Vercel
+                ok = False
+                if NCM_LOCAL:
+                    try:
+                        h = urlparse(NCM_LOCAL)
+                        socket.create_connection((h.hostname, h.port or 80), timeout=0.5).close()
+                        ok = True
+                    except OSError:
+                        pass
+                return self._json({'local': ok})
+            if method == 'GET' and len(parts) >= 3 and parts[:2] == ['api', 'ncm']:   # 转发到本机 netease-api
+                if not NCM_LOCAL:
+                    return self._json({'error': '本机网易云接口未启动'}, 502)
+                path = '/' + '/'.join(parts[2:])
+                if not re.match(r'^/[a-z0-9_/]{1,80}$', path):
+                    return self._json({'error': '接口不合法'}, 400)
+                url = NCM_LOCAL + path + ('?' + u.query if u.query else '')
+                try:
+                    with urllib.request.urlopen(urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'}), timeout=25) as r:
+                        body, code, ctype = r.read(8_000_000), r.status, r.headers.get('Content-Type', 'application/json')
+                except urllib.error.HTTPError as e:
+                    body, code, ctype = e.read(8_000_000), e.code, e.headers.get('Content-Type', 'application/json')
+                except (urllib.error.URLError, OSError):
+                    return self._json({'error': '本机网易云接口连不上'}, 502)
+                if code == 502:
+                    code = 500   # 502 专门留给"本机接口不可用",前端据此退回 Vercel
+                self.send_response(code)
+                self.send_header('Content-Type', ctype)
+                self.send_header('Content-Length', str(len(body)))
+                self.send_header('Cache-Control', 'no-store')
+                self.end_headers()
+                self.wfile.write(body)
+                return
             if method == 'GET' and parts == ['api', 'users']:
                 return self._json(list_users())
             if method == 'GET' and parts == ['api', 'days']:

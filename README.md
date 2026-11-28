@@ -44,6 +44,17 @@ sh start.sh
   未配置 `PARSER_URL` 时,请在抖音里"保存视频"到手机,再用"上传"选择该文件。解析依赖平台接口,随时可能失效。
 - 音乐文件保存在 `data/music/`(不会上传到 GitHub,避免版权问题),列表存在 SQLite 的 `music` 表。
 
+## 网易云加速(可选,推荐)
+App 的网易云功能(搜索、歌单、歌词、播放地址)默认走部署在 Vercel 的 netease-api,海外节点每次请求约 1.5 秒。
+在 Termux 本机也跑一份 netease-api,可降到 0.3~0.6 秒:
+```bash
+pkg install nodejs-lts                                   # 需要 Node 22+
+git clone https://github.com/Florist-xu/netease-api.git ~/netease-api
+cd ~/lose && sh ncm-setup.sh                             # 安装依赖(用国内 npm 镜像),只需一次
+sh start.sh                                              # 之后启动会自动在后台运行它(127.0.0.1:3000)
+```
+`server.py` 通过 `/api/ncm/*` 转发到本机接口;本机接口没启动或出错时,前端自动退回 Vercel。日志在 `~/netease-api/run.log`。
+
 ## 用户
 - 首次打开会弹出登录框,**只需输入用户名**(字母/数字/汉字/_ . -,1~20 个字符,不区分大小写),无需密码;右上角"👤 用户名"可切换用户。
 - 训练记录、历史记录按用户名分开保存。升级前已有的全部记录自动归到用户 **florist**。

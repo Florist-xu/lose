@@ -839,9 +839,24 @@ const NCM_DEFAULT = 'https://netease-api-iota.vercel.app';
 const lsGet = (k, d = '') => { try { return localStorage.getItem(k) || d; } catch { return d; } };
 const lsSet = (k, v) => { try { v ? localStorage.setItem(k, v) : localStorage.removeItem(k); } catch {} };
 const NCM = () => lsGet('ncmApi', NCM_DEFAULT).replace(/\/+$/, '');
+// 优先走服务器本机的 netease-api(经 server.py 转发,国内直连很快);本机不可用时退回 Vercel
+const NCMLOC = { ok: null, until: 0 };
+async function ncmLocalOk() {
+  if (NCMLOC.ok !== null && Date.now() < NCMLOC.until) return NCMLOC.ok;
+  try { NCMLOC.ok = !!(await (await fetch('api/ncm-status')).json()).local; } catch { NCMLOC.ok = false; }
+  NCMLOC.until = Date.now() + 60e3; return NCMLOC.ok;
+}
 async function ncm(path, params = {}) {
-  const q = new URLSearchParams({ ...params, realIP: '116.25.146.177' });   // 服务部署在海外,告诉网易云按国内 IP 处理
+  const q = new URLSearchParams(params);
   const c = lsGet('ncmCookie'); if (c) q.set('cookie', c);
+  if (await ncmLocalOk()) {
+    try {
+      const r = await fetch(`api/ncm${path}?${q}`);
+      if (r.status !== 502) { const j = await r.json(); return j; }
+    } catch {}
+    NCMLOC.ok = false; NCMLOC.until = Date.now() + 60e3;   // 本机接口出问题:1 分钟内改走 Vercel
+  }
+  q.set('realIP', '116.25.146.177');   // Vercel 部署在海外,告诉网易云按国内 IP 处理
   const r = await fetch(`${NCM()}${path}?${q}`); if (!r.ok) throw new Error('音乐服务 HTTP ' + r.status);
   return r.json();
 }
