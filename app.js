@@ -767,7 +767,7 @@ function openModeSheet() {
   box.innerHTML = `<div class="list">
     <label class="li"><span class="ico g">${IC.shuffle}</span><span class="lt">随机播放全部<small>${tracks.length} 首,休息时随机选歌</small></span><input type="radio" name="msel" value="all" ${c === 'all' ? 'checked' : ''}></label>
     ${playlists.map(p => `<label class="li"><span class="ico" style="background:${grad(p.name)}">${esc([...p.name][0] || '♪')}</span><span class="lt">${esc(p.name)}<small>歌单 · ${plTracks(p).length} 首 · 顺序播放</small></span><input type="radio" name="msel" value="playlist:${p.id}" ${c === 'playlist:' + p.id ? 'checked' : ''}></label>`).join('')}
-    ${MV.myPl.length ? `</div><div class="sect">网易云歌单 · 在线播放</div><div class="list">${MV.myPl.map(p => `<label class="li"><span class="ico" style="background:#223 center/cover url('${p.cover}')"></span><span class="lt">${esc(p.name)}<small>${p.count} 首 · 按歌单顺序 · 需联网</small></span><input type="radio" name="msel" value="ncm:${p.id}" ${c === 'ncm:' + p.id ? 'checked' : ''}></label>`).join('')}</div><div class="sect">其他</div><div class="list">` : ''}
+    ${MV.myPl.length ? `</div><div class="sect">网易云歌单 · 在线播放 · ${MV.myPl.length}</div>${MV.myPl.length > 8 ? `<label class="search">${IC.search}<input id="mselQ" type="text" placeholder="筛选网易云歌单" autocomplete="off"></label>` : ''}<div class="list" id="mselNcm">${MV.myPl.map(p => `<label class="li" data-n="${esc(p.name.toLowerCase())}"><span class="ico" style="background:#223 center/cover url('${p.cover}')"></span><span class="lt">${esc(p.name)}<small>${p.count} 首 · 按歌单顺序 · 需联网</small></span><input type="radio" name="msel" value="ncm:${p.id}" ${c === 'ncm:' + p.id ? 'checked' : ''}></label>`).join('')}</div><div class="sect">其他</div><div class="list">` : ''}
     <label class="li"><span class="ico o">${IC.note}</span><span class="lt">单曲循环<small>${c !== 'all' && !c.startsWith('playlist:') && !c.startsWith('ncm:') ? esc(tracks.find(t => String(t.id) === c)?.title || '') : '在歌曲列表里选一首'}</small></span><input type="radio" name="msel" value="one" ${c !== 'all' && !c.startsWith('playlist:') && !c.startsWith('ncm:') ? 'checked' : ''}></label>
   </div>${MV.me ? '<div class="hint">网易云歌单不用下载,休息时在线播放;网络不好时建议在歌单详情里"导入为休息音乐"。</div>' : '<div class="hint">登录网易云(点右上角头像)后,可以直接选你的网易云歌单。</div>'}`;
   box.querySelectorAll('input[name=msel]').forEach(r => r.onchange = () => {
@@ -776,7 +776,9 @@ function openModeSheet() {
     if (r.value.startsWith('ncm:')) { const p = MV.myPl.find(x => 'ncm:' + x.id === r.value); lsSet('restNcmName', p?.name || ''); lsSet('restNcmCover', p?.cover || ''); }
     MV.mode = null; setChosen(r.value); renderMusic(); toast('已更换休息时播放', 1500);
   });
+  if ($('mselQ')) $('mselQ').oninput = e => { const q = e.target.value.trim().toLowerCase(); $('mselNcm').querySelectorAll('[data-n]').forEach(li => li.hidden = !!q && !li.dataset.n.includes(q)); };
   $('modeSheet').hidden = false;
+  box.scrollTop = 0;
 }
 function renderPlaylist(host, p) {
   const a = plTracks(p), using = chosen() === 'playlist:' + p.id;

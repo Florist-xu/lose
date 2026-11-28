@@ -529,6 +529,14 @@ body.miniOn .app{padding-bottom:calc(170px + env(safe-area-inset-bottom))}
 .plgrid .plcard .s{font-size:11px}
 .plgrid .plcard .t{font-size:13px;margin-top:6px}
 #modeSheet .li{cursor:pointer}
+/* 面板内容多时在面板内滚动,背景不跟着滚 */
+.sheetBox{display:flex;flex-direction:column;max-height:calc(100vh - 24px - env(safe-area-inset-top) - env(safe-area-inset-bottom));max-height:calc(100dvh - 24px - env(safe-area-inset-top) - env(safe-area-inset-bottom))}
+.sheetHead{flex:none}
+#modeBody,#ncmBody,.sheetBox>.list,.sheetBox>.prefs{min-height:0}
+#modeBody,#ncmBody{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;margin:0 -16px;padding:0 16px 4px}
+body:has(.sheet:not([hidden])){overflow:hidden}
+.li[hidden]{display:none!important}
+#modeBody .search{position:sticky;top:0;z-index:2;margin:4px 0 8px;background:#243142}
 </style>
 </head>
 <body data-tab="train">
