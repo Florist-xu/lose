@@ -1287,9 +1287,9 @@ function stageFrame(now, dt) {
   gl.bindTexture(gl.TEXTURE_2D, ST.specTex);
   gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, 128, 1, gl.LUMINANCE, gl.UNSIGNED_BYTE, ST.specArr);
   ST.rot += dt * (0.05 + FX.energy * 0.12);
-  const asp = ST.w / Math.max(1, ST.h), th = Math.tan(0.78 / 2), dist = Math.max(2.2, 0.98 / (th * Math.min(asp, 1.4)));   // 竖屏时退远,整盘可见
+  const asp = ST.w / Math.max(1, ST.h), th = Math.tan(0.78 / 2), dist = asp > 1 ? 3.1 : Math.max(2.2, 0.98 / (th * asp));   // 竖屏退远让整盘可见;横屏固定距离   // 竖屏时退远,整盘可见
   const ey = dist * 0.48, er = dist * 0.88;
-  const mvp = m4mul(m4persp(0.78, asp, 0.05, 20), m4look([Math.sin(ST.rot) * er, ey, Math.cos(ST.rot) * er], [0, 0.32, 0]));
+  const mvp = m4mul(m4persp(0.78, asp, 0.05, 20), m4look([Math.sin(ST.rot) * er, ey, Math.cos(ST.rot) * er], [0, asp > 1 ? 0.75 : 0.62, 0]));
   gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT);
   gl.useProgram(ST.prog); gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE);
   gl.bindBuffer(gl.ARRAY_BUFFER, ST.buf);
