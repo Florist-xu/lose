@@ -322,7 +322,8 @@ def music_kind(src):
 def music_row(r):
     d = r['duration'] if 'duration' in r.keys() else None
     return {'id': r['id'], 'title': r['title'], 'ext': r['ext'], 'size': r['size'], 'url': f"music-files/{r['id']}.{r['ext']}",
-            'duration': d if d and d > 0 else None, 'kind': music_kind(r['source'])}
+            'duration': d if d and d > 0 else None, 'kind': music_kind(r['source']),
+            'nid': int(r['source'][8:]) if (r['source'] or '').startswith('netease:') and r['source'][8:].isdigit() else None}
 
 
 def list_music():
@@ -654,7 +655,19 @@ class H(SimpleHTTPRequestHandler):
                     body = json.loads(self.rfile.read(n))
                 except ValueError:
                     return self._json({'error': 'JSON 格式错误'}, 400)
-                return self._json(import_music_link(str(body.get('url', ''))), 201)
+                nid = str(body.get('nid', '')).strip()
+                if nid.isdigit():   # 网易云单曲:同一首只存一份,标题/来源用网易云的信息
+                    with db() as c:
+                        r = c.execute('SELECT * FROM music WHERE source=?', ('netease:' + nid,)).fetchone()
+                    if r:
+                        return self._json({**music_row(r), 'existed': True})
+                song = import_music_link(str(body.get('url', '')))
+                if nid.isdigit():
+                    title = (str(body.get('title', '')).strip() or song['title'])[:60]
+                    with db() as c:
+                        c.execute('UPDATE music SET title=?, source=? WHERE id=?', (title, 'netease:' + nid, song['id']))
+                    song.update(title=title, kind='netease', nid=int(nid))
+                return self._json(song, 201)
             if method == 'DELETE' and parts == ['api', 'music']:   # 清空全部休息音乐(含歌单)
                 with db() as c:
                     mids = [r['id'] for r in c.execute('SELECT id FROM music')]
