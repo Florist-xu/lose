@@ -36,6 +36,9 @@ final class WebViewController: UIViewController, WKNavigationDelegate, WKUIDeleg
         webView.scrollView.backgroundColor = bg
         webView.scrollView.contentInsetAdjustmentBehavior = .never   // 由网页用 safe-area 自行避让刘海
         webView.allowsBackForwardNavigationGestures = false
+        webView.allowsLinkPreview = false                           // 长按链接不弹预览
+        webView.scrollView.minimumZoomScale = 1                    // 禁止双指缩放,像原生 App 一样
+        webView.scrollView.maximumZoomScale = 1
         if #available(iOS 16.4, *) { webView.isInspectable = true }
         view.addSubview(webView)
 
@@ -102,7 +105,10 @@ final class WebViewController: UIViewController, WKNavigationDelegate, WKUIDeleg
         }
     }
 
-    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) { statusLabel.text = nil }
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        statusLabel.text = nil
+        webView.scrollView.pinchGestureRecognizer?.isEnabled = false
+    }
 
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) { showError(error) }
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) { showError(error) }

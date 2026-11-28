@@ -462,6 +462,7 @@ addEventListener('keydown', e => { if (e.key === 'n') $('btnSkip').click(); if (
 
 $('btnStart').onclick = async () => {
   if (!USER) { showLogin(false); return; }
+  stopPreview();
   enterFS(); lock(true);
   try { actx ??= new AudioContext(); actx.resume(); } catch {}
   bgm.muted = true; { const up = bgm.play(); if (up) up.then(() => { bgm.pause(); bgm.muted = !$('sound').checked; }).catch(() => {}); } // 解锁音乐(iOS)
@@ -613,7 +614,7 @@ function toast(msg, ms = 2800) {
 const mNote = (t, cls = '') => { const e = $('mNote'); e.textContent = t; e.className = 'note ' + cls; };
 
 // ---------- 音乐页状态 ----------
-const MV = { pl: null, edit: false, q: '', sel: new Set() };
+const MV = { pl: null, edit: false, q: '', sel: new Set(), mode: null };
 const PV = { ctx: [] };   // 试听的上下文(用于"下一首")
 const previewId = () => restAudio.dataset.prev ? +restAudio.dataset.prev : null;
 
@@ -637,9 +638,9 @@ function renderMusic() {
   $('btnEditMusic').hidden = !tracks.length || !!MV.pl;
   $('btnEditMusic').textContent = MV.edit ? '完成' : '编辑';
   if (MV.pl) return renderPlaylist(host, playlists.find(p => p.id === MV.pl));
-  const c = chosen(), mode = c === 'all' ? 'all' : c.startsWith('playlist:') ? 'pl' : 'one';
-  const curPl = mode === 'pl' ? playlists.find(p => 'playlist:' + p.id === c) : null;
-  const curT = mode === 'one' ? tracks.find(t => String(t.id) === c) : null;
+  const c = chosen(), real = c === 'all' ? 'all' : c.startsWith('playlist:') ? 'pl' : 'one', mode = MV.mode || real;
+  const curPl = real === 'pl' ? playlists.find(p => 'playlist:' + p.id === c) : null;
+  const curT = real === 'one' ? tracks.find(t => String(t.id) === c) : null;
   let nowTitle = '随机播放', nowSub = `${tracks.length} 首${totalDur(tracks) ? ' · ' + totalDur(tracks) : ''}`, nowCover = `<span class="nc-ic">${IC.shuffle}</span>`, nowBg = 'linear-gradient(135deg,#3390ec,#20c997)';
   if (curPl) { const a = plTracks(curPl); nowTitle = curPl.name; nowSub = `歌单 · ${a.length} 首${totalDur(a) ? ' · ' + totalDur(a) : ''} · 顺序播放`; nowCover = esc([...curPl.name][0] || '♪'); nowBg = grad(curPl.name); }
   if (curT) { nowTitle = curT.title; nowSub = `单曲循环 · ${dur(curT.duration)}`; nowCover = `<span class="nc-ic">${IC.note}</span>`; nowBg = grad(curT.title); }
@@ -657,23 +658,26 @@ function renderMusic() {
     </div>
     <div class="seg modeSeg" id="modeSeg">
       <button data-mode="all" class="${mode === 'all' ? 'on' : ''}">随机</button>
-      <button data-mode="pl" class="${mode === 'pl' ? 'on' : ''}" ${playlists.length ? '' : 'disabled'}>歌单</button>
+      <button data-mode="pl" class="${mode === 'pl' ? 'on' : ''}">歌单</button>
       <button data-mode="one" class="${mode === 'one' ? 'on' : ''}">单曲</button>
     </div>
     ${playlists.length ? `<div class="sect">歌单 · ${playlists.length}</div>
     <div class="plrow">${playlists.map(p => { const a = plTracks(p); return `<button class="plcard" data-pl="${p.id}">
       <span class="plcover" style="background:${grad(p.name)}">${esc([...p.name][0] || '♪')}${curPl?.id === p.id ? `<i class="chk">${IC.check}</i>` : ''}</span>
-      <span class="t">${esc(p.name)}</span><span class="s">${a.length} 首${totalDur(a) ? ' · ' + totalDur(a) : ''}</span></button>`; }).join('')}</div>` : ''}
+      <span class="t">${esc(p.name)}</span><span class="s">${a.length} 首${totalDur(a) ? ' · ' + totalDur(a) : ''}</span></button>`; }).join('')}</div>`
+    : mode === 'pl' ? `<div class="sect">歌单</div><div class="plempty glass"><b>还没有歌单</b><span>复制网易云歌单的分享链接,回到这里即可一键导入</span><button class="pri" id="plImport">导入网易云歌单</button></div>` : ''}
     <div class="sect">全部歌曲 · ${tracks.length}${mode === 'one' && !MV.edit ? '<span class="sect-r">选中 = 单曲循环</span>' : ''}</div>
     ${tracks.length > 10 ? `<label class="search">${IC.search}<input id="mSearch" type="text" placeholder="搜索歌曲" value="${esc(MV.q)}" autocomplete="off"></label>` : ''}
     ${MV.edit ? `<div class="editbar"><span>已选 ${MV.sel.size} 首</span><button id="selAll">${MV.sel.size === list.length ? '全不选' : '全选'}</button><button class="danger" id="delSel" ${MV.sel.size ? '' : 'disabled'}>删除所选</button><button class="danger" id="delAll">全部删除</button></div>` : ''}
     <div class="list songs" id="songList">${list.map(t => songRow(t, { radio: mode === 'one' ? curT?.id ?? -1 : 0 })).join('') || '<div class="li"><span class="sub">没有匹配的歌曲</span></div>'}</div>
     ${MV.edit ? '' : '<div class="hint">点歌曲试听,向左滑动可删除。</div>'}`;
+  if ($('plImport')) $('plImport').onclick = openAdd;
   $('nowPlay').onclick = () => { const ctx = curPl ? plTracks(curPl) : curT ? [curT] : [...tracks].sort(() => Math.random() - 0.5); if (ctx.length) previewTrack(ctx[0].id, ctx.map(t => t.id)); };
   host.querySelectorAll('[data-mode]').forEach(b => b.onclick = () => {
     const m = b.dataset.mode;
+    MV.mode = null;
     if (m === 'all') setChosen('all');
-    else if (m === 'pl') { if (!curPl && playlists[0]) setChosen('playlist:' + playlists[0].id); }
+    else if (m === 'pl') { if (!playlists.length) MV.mode = 'pl'; else if (!curPl) setChosen('playlist:' + playlists[0].id); }
     else if (!curT && tracks[0]) setChosen(String(tracks[0].id));
     renderMusic();
   });
@@ -766,7 +770,8 @@ function markPlaying() {
 }
 function syncMini() {
   const id = previewId(), t = id != null && tracks.find(x => x.id === id), m = $('mini');
-  m.hidden = !(t && TAB === 'music');
+  m.hidden = !t || document.body.classList.contains('training');
+  document.body.classList.toggle('miniOn', !m.hidden);
   if (m.hidden) return;
   $('miniCover').style.background = grad(t.title); $('miniTitle').textContent = t.title;
   $('miniPlay').innerHTML = restAudio.paused ? IC.play : IC.pause; $('miniPlay').setAttribute('aria-label', restAudio.paused ? '播放' : '暂停');
@@ -777,6 +782,19 @@ function syncMini() {
 restAudio.addEventListener('ended', () => { if (restAudio.dataset.prev) nextPreview(); });
 $('miniPlay').onclick = () => { if (restAudio.paused) restAudio.play().catch(() => {}); else restAudio.pause(); };
 $('miniNext').onclick = nextPreview;
+{ // 拖动进度条快进/快退
+  const el = $('miniSeek'); let on = false;
+  const seek = e => {
+    const r = el.firstElementChild.getBoundingClientRect(), p = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)), d = restAudio.duration;
+    if (!isFinite(d) || d <= 0) return;
+    restAudio.currentTime = p * d; $('miniFill').style.width = p * 100 + '%';
+    $('miniTime').textContent = dur(p * d || 0.001) + ' / ' + dur(d);
+  };
+  el.addEventListener('pointerdown', e => { on = true; el.classList.add('drag'); try { el.setPointerCapture(e.pointerId); } catch {} seek(e); });
+  el.addEventListener('pointermove', e => { if (on) seek(e); });
+  const end = () => { on = false; el.classList.remove('drag'); };
+  el.addEventListener('pointerup', end); el.addEventListener('pointercancel', end);
+}
 $('miniClose').onclick = stopPreview;
 $('miniNext').innerHTML = IC.next; $('miniClose').innerHTML = IC.close;
 
@@ -876,7 +894,7 @@ function renderWorkouts() {
 function switchTab(t) {
   if (!TABS[t]) t = 'train';
   if (S.phase === 'active' || S.phase === 'rest') return; // 训练中不切换
-  if (TAB === 'music' && t !== 'music') { stopPreview(); MV.edit = false; MV.sel.clear(); } // 离开音乐页:停掉试听
+  if (TAB === 'music' && t !== 'music') { MV.edit = false; MV.sel.clear(); MV.mode = null; } // 试听继续播放,迷你播放条跟随
   TAB = t; document.body.dataset.tab = t;
   $('tabbar').style.setProperty('--i', Object.keys(TABS).indexOf(t));
   for (const [k, [id, title]] of Object.entries(TABS)) {
@@ -886,7 +904,7 @@ function switchTab(t) {
   document.querySelectorAll('.tab').forEach(b => { if (b.dataset.tab === t) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current'); });
   try { history.replaceState(null, '', location.pathname + location.search + '#' + t); } catch {}
   scrollTo(0, 0);
-  if (t !== 'music') $('mini').hidden = true;
+  syncMini();
   if (t === 'music') { MV.pl = null; openMusic(); } else if (t === 'hist') openHistory(); else if (t === 'work') renderWorkouts();
 }
 document.querySelectorAll('.tab').forEach(b => b.onclick = () => switchTab(b.dataset.tab));
