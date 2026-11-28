@@ -896,6 +896,13 @@ const setSheet = $('setSheet');
 $('btnSet').onclick = () => { setSheet.hidden = false; };
 $('setDone').onclick = () => { setSheet.hidden = true; };
 setSheet.addEventListener('click', e => { if (e.target === setSheet) setSheet.hidden = true; });
+// 在 iOS App 里运行时:设置面板多一项"切换服务器地址"
+if (window.webkit?.messageHandlers?.app) {
+  const row = document.createElement('button'); row.className = 'prow'; row.style.cssText = 'width:100%;background:none;border-radius:0;padding:13px 0';
+  row.innerHTML = '<span>服务器地址</span><span style="color:var(--ac);font-size:14px">修改 ›</span>';
+  row.onclick = () => { setSheet.hidden = true; window.webkit.messageHandlers.app.postMessage('server'); };
+  setSheet.querySelector('.prefs').appendChild(row);
+}
 
 init().then(() => { const h = location.hash.slice(1); if (TABS[h] && h !== 'train') switchTab(h); });
 if (!USER) showLogin(false);

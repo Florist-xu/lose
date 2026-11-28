@@ -5,3 +5,7 @@ server.log
 certs/
 data/
 __pycache__/
+ios/build/
+ios/*.xcodeproj/
+ios/Payload/
+ios/*.ipa

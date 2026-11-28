@@ -754,6 +754,9 @@ class H(SimpleHTTPRequestHandler):
     def end_headers(self):
         self.send_header('X-Content-Type-Options', 'nosniff')
         self.send_header('Accept-Ranges', 'bytes')
+        p = urlparse(self.path).path
+        if p.endswith(('/', '.html', '.js', '.json')):   # 页面/脚本/配置每次向服务器确认,改了代码 App 下次打开即生效
+            self.send_header('Cache-Control', 'no-cache')
         super().end_headers()
 
 
