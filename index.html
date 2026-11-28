@@ -328,7 +328,7 @@ body:not([data-tab=music]) #btnAddMusic,body:not([data-tab=music]) #btnEditMusic
 .sect{display:flex;align-items:baseline;justify-content:space-between}
 .sect-r{font-weight:500;color:var(--mut);font-size:12px}
 /* 歌单横向卡片 */
-.plrow{display:flex;gap:12px;overflow-x:auto;scroll-snap-type:x mandatory;margin:0 -14px;padding:2px 14px 6px;scrollbar-width:none}
+.plrow{display:flex;gap:12px;overflow-x:auto;scroll-snap-type:x mandatory;scroll-padding:0 14px;margin:0 -14px;padding:2px 14px 6px;scrollbar-width:none}
 .plrow::-webkit-scrollbar{display:none}
 .plcard{flex:none;width:136px;scroll-snap-align:start;display:flex;flex-direction:column;align-items:flex-start;gap:2px;padding:0;background:none;text-align:left;border-radius:0}
 .plcard:hover{background:none}
@@ -507,6 +507,10 @@ body.miniOn .app{padding-bottom:calc(170px + env(safe-area-inset-bottom))}
   #pView{visibility:hidden}
 }
 @media(prefers-reduced-motion:reduce){.pbg{animation:none}.lyl,.lyin{transition:none}}
+
+.plcover.img{background:#223 center/cover no-repeat;font-size:0}
+.plcover .heart{position:absolute;left:8px;bottom:8px;width:26px;height:26px;border-radius:50%;display:grid;place-items:center;font-size:14px;font-style:normal;color:#fff;background:#e5484d}
+.srow.net .lt small{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 </style>
 </head>
 <body data-tab="train">

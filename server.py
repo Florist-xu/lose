@@ -608,6 +608,26 @@ class H(SimpleHTTPRequestHandler):
                     for playlist in playlists:
                         playlist['trackIds'] = [r['music_id'] for r in c.execute('SELECT music_id FROM playlist_tracks WHERE playlist_id=? ORDER BY position', (playlist['id'],))]
                 return self._json(playlists)
+            if method == 'POST' and parts == ['api', 'playlists']:   # 保存/更新歌单(前端已把歌曲逐首导入后提交顺序)
+                n = int(self.headers.get('Content-Length') or 0)
+                if n <= 0 or n > 200000:
+                    return self._json({'error': '请求体大小不合法'}, 413)
+                try:
+                    body = json.loads(self.rfile.read(n))
+                except ValueError:
+                    return self._json({'error': 'JSON 格式错误'}, 400)
+                source = str(body.get('source', ''))[:100]
+                name = (str(body.get('name', '')).strip() or '歌单')[:100]
+                ids = [int(x) for x in body.get('ids', []) if str(x).isdigit()][:1000]
+                if not re.match(r'^netease:\d+$', source):
+                    raise ValueError('歌单来源不合法')
+                with db() as c:
+                    ok = {r['id'] for r in c.execute('SELECT id FROM music')}
+                    c.execute('INSERT INTO playlists(source,name) VALUES(?,?) ON CONFLICT(source) DO UPDATE SET name=excluded.name', (source, name))
+                    pid = c.execute('SELECT id FROM playlists WHERE source=?', (source,)).fetchone()['id']
+                    c.execute('DELETE FROM playlist_tracks WHERE playlist_id=?', (pid,))
+                    c.executemany('INSERT OR IGNORE INTO playlist_tracks(playlist_id,music_id,position) VALUES(?,?,?)', [(pid, m, i) for i, m in enumerate(ids) if m in ok])
+                return self._json({'id': pid, 'name': name, 'count': len([m for m in ids if m in ok])}, 201)
             if method == 'DELETE' and len(parts) == 3 and parts[1] == 'playlists' and parts[2].isdigit():
                 pid = int(parts[2])
                 with db() as c:   # 删歌单时连同歌曲一起删(仍被其他歌单引用的歌曲保留)

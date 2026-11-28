@@ -614,7 +614,7 @@ function toast(msg, ms = 2800) {
 const mNote = (t, cls = '') => { const e = $('mNote'); e.textContent = t; e.className = 'note ' + cls; };
 
 // ---------- 音乐页状态 ----------
-const MV = { pl: null, edit: false, q: '', sel: new Set(), mode: null, view: '', sq: '', sr: [], me: undefined };
+const MV = { pl: null, edit: false, q: '', sel: new Set(), mode: null, view: '', sq: '', sr: [], me: undefined, myPl: [], npl: null, nplItems: {}, importing: {} };
 const PV = { ctx: [] };   // 试听的上下文(用于"下一首")
 const previewId = () => { const k = restAudio.dataset.prev || ''; return k.startsWith('l:') ? +k.slice(2) : null; };
 
@@ -624,12 +624,14 @@ async function openMusic() {
   renderMusic();
   checkClipboard(false);
   const before = META.size; await ensureMeta(tracks.map(t => t.nid));          // 网易云歌曲补封面/歌手
-  const me = await ncmStatus(); const changed = !!me !== !!MV.me || me?.vip !== MV.me?.vip; MV.me = me;
+  const me = await ncmStatus(); let changed = !!me !== !!MV.me || me?.vip !== MV.me?.vip; MV.me = me;
+  const nb = MV.myPl.length; await loadMyPlaylists(); if (MV.myPl.length !== nb) changed = true;
   if (TAB === 'music' && !MV.view && (META.size !== before || changed)) renderMusic();
 }
 function bindMusicTop() {
   $('goSearch').onclick = () => { MV.view = 'search'; MV.edit = false; renderMusic(); scrollTo(0, 0); };
   $('ncmRow').onclick = openNcmLogin;
+  document.querySelectorAll('#pgMusic [data-npl]').forEach(b => b.onclick = () => { MV.view = 'npl'; MV.npl = +b.dataset.npl; MV.edit = false; renderMusic(); scrollTo(0, 0); });
 }
 function songRow(t, opt = {}) {
   const it = itemLocal(t), k = KIND[t.kind] || KIND.link, on = restAudio.dataset.prev === it.key, eq = `<span class="eq${restAudio.paused ? ' paused' : ''}"><i></i><i></i><i></i></span>`;
@@ -645,6 +647,7 @@ function renderMusic() {
   const host = $('pgMusic');
   $('btnEditMusic').hidden = !tracks.length || !!MV.pl || !!MV.view;
   if (MV.view === 'search') return renderSearch(host);
+  if (MV.view === 'npl') return renderNetPlaylist(host);
   $('btnEditMusic').textContent = MV.edit ? '完成' : '编辑';
   if (MV.pl) return renderPlaylist(host, playlists.find(p => p.id === MV.pl));
   const c = chosen(), real = c === 'all' ? 'all' : c.startsWith('playlist:') ? 'pl' : 'one', mode = MV.mode || real;
@@ -656,7 +659,7 @@ function renderMusic() {
   if (!tracks.length) {
     host.innerHTML = `<div id="clipBanner" class="clip" hidden></div>
     <button class="search sbig fake" id="goSearch">${IC.search}<span>搜索网易云歌曲</span></button>
-      <div class="empty"><div class="empty-ic">${IC.note}</div><b>还没有休息音乐</b><span>上传文件,或粘贴抖音 / 网易云歌单链接</span><button class="pri" id="emptyAdd">添加音乐</button></div><div class="sect">网易云账号</div><div class="list"><button class="li" id="ncmRow"><span class="ico r">${IC.note}</span><span class="lt" id="ncmRowT">${MV.me ? esc(MV.me.name) : '登录网易云'}<small>${MV.me ? (MV.me.vip ? '黑胶 VIP · 可播放 VIP 歌曲' : '已登录') : '登录后可播放 VIP 歌曲(扫码 / 验证码)'}</small></span></button></div>`;
+      <div class="empty"><div class="empty-ic">${IC.note}</div><b>还没有休息音乐</b><span>上传文件,或粘贴抖音 / 网易云歌单链接</span><button class="pri" id="emptyAdd">添加音乐</button></div>${myPlSection()}<div class="sect">网易云账号</div><div class="list"><button class="li" id="ncmRow"><span class="ico r">${IC.note}</span><span class="lt" id="ncmRowT">${MV.me ? esc(MV.me.name) : '登录网易云'}<small>${MV.me ? (MV.me.vip ? '黑胶 VIP · 可播放 VIP 歌曲' : '已登录') : '登录后可播放 VIP 歌曲(扫码 / 验证码)'}</small></span></button></div>`;
     $('emptyAdd').onclick = openAdd; bindMusicTop(); return;
   }
   const q = MV.q.trim().toLowerCase(), list = q ? tracks.filter(t => t.title.toLowerCase().includes(q)) : tracks;
@@ -677,6 +680,7 @@ function renderMusic() {
       <span class="plcover" style="background:${grad(p.name)}">${esc([...p.name][0] || '♪')}${curPl?.id === p.id ? `<i class="chk">${IC.check}</i>` : ''}</span>
       <span class="t">${esc(p.name)}</span><span class="s">${a.length} 首${totalDur(a) ? ' · ' + totalDur(a) : ''}</span></button>`; }).join('')}</div>`
     : mode === 'pl' ? `<div class="sect">歌单</div><div class="plempty glass"><b>还没有歌单</b><span>复制网易云歌单的分享链接,回到这里即可一键导入</span><button class="pri" id="plImport">导入网易云歌单</button></div>` : ''}
+    ${myPlSection()}
     <div class="sect">全部歌曲 · ${tracks.length}${mode === 'one' && !MV.edit ? '<span class="sect-r">选中 = 单曲循环</span>' : ''}</div>
     ${tracks.length > 10 ? `<label class="search">${IC.search}<input id="mSearch" type="text" placeholder="在已添加的歌曲中筛选" value="${esc(MV.q)}" autocomplete="off"></label>` : ''}
     ${MV.edit ? `<div class="editbar"><span>已选 ${MV.sel.size} 首</span><button id="selAll">${MV.sel.size === list.length ? '全不选' : '全选'}</button><button class="danger" id="delSel" ${MV.sel.size ? '' : 'disabled'}>删除所选</button><button class="danger" id="delAll">全部删除</button></div>` : ''}
@@ -996,6 +1000,75 @@ function lyTick(force) {
 (function lyLoop() { if (!player.hidden && !restAudio.paused) { lyTick(false); const d = restAudio.duration; if (isFinite(d) && d > 0) { $('pFill').style.width = restAudio.currentTime / d * 100 + '%'; $('pCurT').textContent = dur(restAudio.currentTime || 0.001); $('pDurT').textContent = dur(d); } } requestAnimationFrame(lyLoop); })();
 restAudio.addEventListener('loadedmetadata', () => { const d = restAudio.duration; if (isFinite(d)) $('pDurT').textContent = dur(d); });
 
+
+// ---------- 我的网易云歌单(登录后同步) ----------
+async function loadMyPlaylists() {
+  if (!MV.me?.uid) { MV.myPl = []; return; }
+  try {
+    const j = await ncm('/user/playlist', { uid: MV.me.uid, limit: 200, timestamp: Date.now() });
+    MV.myPl = (j.playlist || []).map(p => ({ id: p.id, name: p.specialType === 5 ? '我喜欢的音乐' : p.name, count: p.trackCount, cover: coverOf(p.coverImgUrl, 300), mine: p.userId === MV.me.uid, like: p.specialType === 5 }));
+  } catch { MV.myPl = []; }
+}
+const myPlSection = () => MV.myPl.length ? `<div class="sect">我的网易云歌单 · ${MV.myPl.length}<span class="sect-r">点开可播放或导入</span></div>
+  <div class="plrow">${MV.myPl.map(p => `<button class="plcard" data-npl="${p.id}"><span class="plcover img" style="background-image:url('${p.cover}')">${p.like ? '<i class="heart">♥</i>' : ''}${playlists.some(x => x.name === p.name) ? `<i class="chk">${IC.check}</i>` : ''}</span>
+    <span class="t">${esc(p.name)}</span><span class="s">${p.count} 首${p.mine ? '' : ' · 收藏'}</span></button>`).join('')}</div>` : '';
+const netRow = (it, i) => `<div class="srow net" data-key="${it.key}"><div class="sfront">
+    <span class="thumb" style="background-image:url('${it.cover}')"><span class="thumbEq" hidden><span class="eq"><i></i><i></i><i></i></span></span></span>
+    <span class="lt">${esc(it.title)}<small>${it.fee === 1 ? '<b class="kb" style="background:#e5484d">VIP</b>' : ''}${esc(it.artist)}${it.album ? ' · ' + esc(it.album) : ''}</small></span>
+    <span class="trail">${dur(it.duration)}</span></div></div>`;
+async function renderNetPlaylist(host) {
+  const p = MV.myPl.find(x => x.id === MV.npl); if (!p) { MV.view = ''; return renderMusic(); }
+  const busy = MV.importing[p.id];
+  host.innerHTML = `<button class="backbtn" id="nplBack">${IC.back}音乐</button>
+    <div class="pldHead"><div class="plcover big img" style="background-image:url('${p.cover}')"></div>
+      <div class="lt"><b>${esc(p.name)}</b><small>网易云歌单 · ${p.count} 首</small></div></div>
+    <div class="pldActs"><button class="pri" id="nplPlay">${IC.play}播放全部</button><button id="nplImport" ${busy ? 'disabled' : ''}>${busy || '导入为休息音乐'}</button></div>
+    <div id="nplList"><div class="hint" style="text-align:center;padding:30px 0">加载歌曲中…</div></div>
+    <div class="hint">"导入为休息音乐"会把歌曲下载到你的服务器,并在"歌单"里生成同名歌单,训练休息时可直接选用;已登录黑胶 VIP 时 VIP 歌曲也能导入。</div>`;
+  $('nplBack').onclick = () => { MV.view = ''; renderMusic(); };
+  let items = MV.nplItems[p.id];
+  if (!items) {
+    try { const j = await ncm('/playlist/track/all', { id: p.id, limit: 1000, timestamp: Date.now() }); items = MV.nplItems[p.id] = (j.songs || []).map(itemNet); }
+    catch (e) { if ($('nplList')) $('nplList').innerHTML = `<div class="note bad" style="text-align:center">加载失败:${esc(e.message)}</div>`; return; }
+  }
+  if (MV.view !== 'npl' || MV.npl !== p.id) return;
+  $('nplList').innerHTML = items.length ? `<div class="list songs">${items.map(netRow).join('')}</div>` : '<div class="hint" style="text-align:center;padding:30px 0">歌单是空的</div>';
+  $('nplList').querySelectorAll('.srow').forEach(r => r.querySelector('.sfront').onclick = () => playItem(items.find(x => x.key === r.dataset.key), items));
+  $('nplPlay').onclick = () => { if (items.length) playItem(PL.mode === 'shuffle' ? items[Math.floor(Math.random() * items.length)] : items[0], items); };
+  $('nplImport').onclick = () => importNetPlaylist(p, items);
+  markPlaying();
+}
+async function importNetPlaylist(p, items) {
+  if (MV.importing[p.id] || !items.length) return;
+  if (!confirm(`把「${p.name}」的 ${items.length} 首歌下载到服务器作为休息音乐?歌曲多时需要几分钟,期间可以离开这个页面。`)) return;
+  const have = new Map(tracks.filter(t => t.nid).map(t => [t.nid, t.id]));
+  const ids = []; let ok = 0, skip = 0, fail = 0, vip = 0;
+  const upd = txt => { MV.importing[p.id] = txt; const b = $('nplImport'); if (b && MV.npl === p.id) { b.textContent = txt; b.disabled = true; } };
+  for (let i = 0; i < items.length; i += 10) {
+    const batch = items.slice(i, i + 10), need = batch.filter(it => !have.has(it.nid));
+    let urls = new Map();
+    if (need.length) {
+      try { const j = await ncm('/song/url/v1', { id: need.map(it => it.nid).join(','), level: 'exhigh' }); urls = new Map((j.data || []).map(d => [d.id, d])); } catch {}
+    }
+    for (const it of batch) {
+      upd(`导入中 ${ids.length + fail + vip + 1}/${items.length}…`);
+      if (have.has(it.nid)) { ids.push(have.get(it.nid)); skip++; continue; }
+      const d = urls.get(it.nid);
+      if (!d?.url || d.freeTrialInfo) { vip++; continue; }   // 无版权 / 非 VIP 只能试听片段:跳过
+      try {
+        const r = await fetch('api/music/link', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: https_(d.url), nid: it.nid, title: it.title + (it.artist ? ' - ' + it.artist : '') }) });
+        const sj = await r.json().catch(() => ({})); if (!r.ok) throw new Error(sj.error);
+        ids.push(sj.id); have.set(it.nid, sj.id); ok++;
+      } catch { fail++; }
+    }
+  }
+  try { await fetch('api/playlists', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ source: 'netease:' + p.id, name: p.name, ids }) }); } catch {}
+  delete MV.importing[p.id];
+  await loadTracks();
+  toast(`「${p.name}」导入完成:新增 ${ok} 首,已有 ${skip} 首` + (vip ? `,无版权/需 VIP ${vip} 首` : '') + (fail ? `,失败 ${fail} 首` : ''), 6000);
+  if (TAB === 'music') renderMusic();
+}
+
 // ---------- 在线搜索 ----------
 async function renderSearch(host) {
   host.innerHTML = `<button class="backbtn" id="srBack">${IC.back}音乐</button>
@@ -1032,7 +1105,7 @@ async function renderSearch(host) {
 const ncmSheet = $('ncmSheet');
 async function ncmStatus() {
   if (!lsGet('ncmCookie')) return null;
-  try { const j = await ncm('/login/status', { timestamp: Date.now() }); const p = j.data?.profile || j.profile; return p ? { name: p.nickname, avatar: p.avatarUrl, vip: (j.data?.account?.vipType || 0) > 0 } : null; } catch { return null; }
+  try { const j = await ncm('/login/status', { timestamp: Date.now() }); const p = j.data?.profile || j.profile; return p ? { uid: p.userId, name: p.nickname, avatar: p.avatarUrl, vip: (j.data?.account?.vipType || 0) > 0 } : null; } catch { return null; }
 }
 let qrTimer = null;
 async function openNcmLogin() {
@@ -1042,7 +1115,7 @@ async function openNcmLogin() {
   if (me) {
     box.innerHTML = `<div class="ncmMe"><img src="${coverOf(me.avatar, 120)}" alt=""><b>${esc(me.name)}</b><span>${me.vip ? '黑胶 VIP · 可播放 VIP 歌曲' : '普通账号'}</span></div>
       <div class="btns"><button class="danger" id="ncmOut">退出网易云登录</button></div>`;
-    $('ncmOut').onclick = async () => { try { await ncm('/logout'); } catch {} lsSet('ncmCookie', ''); ncmSheet.hidden = true; toast('已退出网易云'); if (TAB === 'music') renderMusic(); };
+    $('ncmOut').onclick = async () => { try { await ncm('/logout'); } catch {} lsSet('ncmCookie', ''); ncmSheet.hidden = true; toast('已退出网易云'); MV.me = null; MV.myPl = []; if (TAB === 'music') renderMusic(); };
     return;
   }
   box.innerHTML = `<div class="seg ncmSeg"><button class="on" data-lg="qr">扫码登录</button><button data-lg="sms">验证码登录</button></div><div id="ncmPane"></div>`;
@@ -1060,7 +1133,7 @@ async function openNcmLogin() {
           const s = await ncm('/login/qr/check', { key: k, timestamp: Date.now() });
           if (s.code === 802) $('qrSt').textContent = '已扫码,请在手机上确认登录';
           if (s.code === 800) { clearInterval(qrTimer); $('qrSt').textContent = '二维码已过期,切换一下标签重新生成'; }
-          if (s.code === 803) { clearInterval(qrTimer); lsSet('ncmCookie', s.cookie); toast('网易云登录成功'); openNcmLogin(); if (TAB === 'music') renderMusic(); }
+          if (s.code === 803) { clearInterval(qrTimer); lsSet('ncmCookie', s.cookie); toast('网易云登录成功'); openNcmLogin(); MV.me = undefined; if (TAB === 'music') openMusic(); }
         } catch {}
       }, 2500);
     } catch (e) { pane.innerHTML = `<div class="note bad">二维码生成失败:${esc(e.message)}</div>`; }
@@ -1076,7 +1149,7 @@ async function openNcmLogin() {
     };
     $('lgGo').onclick = async () => {
       const ph = $('lgPhone').value.trim(), code = $('lgCode').value.trim(); if (!ph || !code) return note('请填写手机号和验证码', 'bad');
-      try { const j = await ncm('/login/cellphone', { phone: ph, captcha: code, timestamp: Date.now() }); if (j.code !== 200 || !j.cookie) throw new Error(j.message || j.msg || '登录失败'); lsSet('ncmCookie', j.cookie); toast('网易云登录成功'); openNcmLogin(); if (TAB === 'music') renderMusic(); }
+      try { const j = await ncm('/login/cellphone', { phone: ph, captcha: code, timestamp: Date.now() }); if (j.code !== 200 || !j.cookie) throw new Error(j.message || j.msg || '登录失败'); lsSet('ncmCookie', j.cookie); toast('网易云登录成功'); openNcmLogin(); MV.me = undefined; if (TAB === 'music') openMusic(); }
       catch (e) { note(e.message + '(网易云风控时请改用扫码登录)', 'bad'); }
     };
   };
