@@ -834,6 +834,7 @@ function bindSongList(host, ctx) {
 }
 
 // ---------- 网易云 API(部署在 Vercel,可在设置里改) ----------
+restAudio.crossOrigin = 'anonymous';
 const NCM_DEFAULT = 'https://netease-api-iota.vercel.app';
 const lsGet = (k, d = '') => { try { return localStorage.getItem(k) || d; } catch { return d; } };
 const lsSet = (k, v) => { try { v ? localStorage.setItem(k, v) : localStorage.removeItem(k); } catch {} };
@@ -919,7 +920,7 @@ $('miniPlay').onclick = () => { if (restAudio.paused) restAudio.play().catch(() 
 $('miniNext').onclick = nextPreview;
 $('miniClose').onclick = stopPreview;
 $('miniNext').innerHTML = IC.next; $('miniClose').innerHTML = IC.close;
-$('miniCover').onclick = $('miniTitle').parentElement.onclick = () => openPlayer();
+$('mini').onclick = e => { if (!e.target.closest('button')) openPlayer(); };   // 点播放条任意位置(按钮除外)打开歌词页
 function bindSeek(el, fill, onLabel) {   // 进度条:点击/拖动快进快退
   let on = false;
   const seek = e => {
@@ -932,7 +933,7 @@ function bindSeek(el, fill, onLabel) {   // 进度条:点击/拖动快进快退
   const end = () => { on = false; el.classList.remove('drag'); };
   el.addEventListener('pointerup', end); el.addEventListener('pointercancel', end);
 }
-bindSeek($('miniSeek'), $('miniFill'));
+// 迷你播放条只显示进度,不可拖动(避免误触);快进在歌词页里操作
 
 // ---------- 全屏播放页(封面取色背景 + 逐行/逐字歌词) ----------
 const PIC = {
@@ -948,8 +949,8 @@ const PIC = {
 };
 const MODES = { list: ['list', '顺序播放'], shuffle: ['shuffle', '随机播放'], one: ['one', '单曲循环'] };
 const player = $('player');
-$('pClose').innerHTML = PIC.down; $('pPrev').innerHTML = PIC.prev; $('pNext').innerHTML = IC.next;
-function openPlayer() { if (!curItem()) return; player.hidden = false; requestAnimationFrame(() => player.classList.add('show')); syncPlayer(); syncMini(); lyTick(true); }
+$('pClose').innerHTML = PIC.down; $('pStyle').innerHTML = '<svg viewBox="0 0 24 24"><path d="M12 3l1.8 4.7L18.5 9.5l-4.7 1.8L12 16l-1.8-4.7L5.5 9.5l4.7-1.8z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/></svg>'; $('pStyle').onclick = openLySheet; $('pPrev').innerHTML = PIC.prev; $('pNext').innerHTML = IC.next;
+function openPlayer() { if (!curItem()) return; player.hidden = false; fxAudio(); requestAnimationFrame(fxResize); requestAnimationFrame(() => player.classList.add('show')); syncPlayer(); syncMini(); lyTick(true); }
 function closePlayer() { player.classList.remove('show'); setTimeout(() => { player.hidden = true; syncMini(); }, 280); }
 $('pClose').onclick = closePlayer;
 $('pView').onclick = () => { player.classList.toggle('v-lyric'); $('pView').innerHTML = player.classList.contains('v-lyric') ? PIC.disc : PIC.lyric; lyTick(true); };
@@ -980,7 +981,7 @@ function coverColor(url) {   // 取封面平均色,用作背景氛围
       const c = document.createElement('canvas'); c.width = c.height = 16; const x = c.getContext('2d'); x.drawImage(img, 0, 0, 16, 16);
       const d = x.getImageData(0, 0, 16, 16).data; let r = 0, g = 0, b = 0;
       for (let i = 0; i < d.length; i += 4) { r += d[i]; g += d[i + 1]; b += d[i + 2]; }
-      const n = d.length / 4; player.style.setProperty('--pc', `rgb(${r / n | 0},${g / n | 0},${b / n | 0})`);
+      const n = d.length / 4; player.style.setProperty('--pc', `rgb(${r / n | 0},${g / n | 0},${b / n | 0})`); fxSetColor(r / n, g / n, b / n);
     } catch {}
   };
   img.src = url;
@@ -1038,32 +1039,159 @@ async function loadLyrics(it) {
     LY.lines = lines; renderLyrics(lines.length ? '' : '暂无歌词');
   } catch { if (LY.key === it.key) renderLyrics('歌词加载失败'); }
 }
+// ---------- 歌词渲染:逐字拆分(每个字有自己的时间),多种动画风格 ----------
+const LYS = { style: lsGet('lyStyle', 'flow'), fx: lsGet('lyFx', '1') === '1', tr: lsGet('lyTr', '1') === '1' };
+const LY_STYLES = { flow: ['流光', '逐字填充,其余行按距离模糊'], focus: ['聚焦', '只显示当前一句,大字居中逐字浮现'], bounce: ['跃动', '每个字弹跳出场,唱到时轻轻上浮'], rise: ['浮现', '文字从四周飘散聚拢,像粒子拼成句子'] };
+function applyLyStyle() {
+  for (const k of Object.keys(LY_STYLES)) player.classList.toggle('ly-' + k, LYS.style === k);
+  player.classList.toggle('no-tr', !LYS.tr);
+}
+function lineChars(l, next) {
+  const out = [];
+  if (l.words) {
+    for (const w of l.words) { const cs = [...w.w]; cs.forEach((ch, j) => out.push({ ch, t: w.t + w.d * j / cs.length, d: Math.max(0.04, w.d / cs.length) })); }
+  } else {
+    const cs = [...l.text], span = Math.min((next ?? l.t + 5) - l.t, Math.max(1.2, cs.length * 0.32));
+    cs.forEach((ch, j) => out.push({ ch, t: l.t + span * j / cs.length, d: Math.max(0.04, span / cs.length) }));
+  }
+  return out;
+}
 function renderLyrics(msg) {
-  const box = $('lyIn');
+  const box = $('lyIn'); applyLyStyle();
   if (msg || !LY.lines.length) { box.innerHTML = `<div class="lyempty">${esc(msg || '暂无歌词')}</div>`; box.style.transform = ''; $('pMini').textContent = ''; return; }
-  box.innerHTML = LY.lines.map((l, i) => `<div class="lyl" data-i="${i}"><div class="lyt">${l.words ? l.words.map(w => `<span class="w">${esc(w.w)}</span>`).join('') : esc(l.text)}</div>${l.tr ? `<div class="lytr">${esc(l.tr)}</div>` : ''}</div>`).join('');
+  LY.lines.forEach((l, i) => { l.chars = lineChars(l, LY.lines[i + 1]?.t); });
+  const rnd = (a) => (Math.random() * 2 - 1) * a;
+  box.innerHTML = LY.lines.map((l, i) => `<div class="lyl" data-i="${i}"><div class="lyt">${l.chars.map((c, j) =>
+    `<span class="c" style="--i:${j};--rx:${rnd(60) | 0}px;--ry:${rnd(40) | 0}px;--rr:${rnd(40) | 0}deg">${c.ch === ' ' ? '&nbsp;' : esc(c.ch)}</span>`).join('')}</div>${l.tr ? `<div class="lytr">${esc(l.tr)}</div>` : ''}</div>`).join('');
   box.querySelectorAll('.lyl').forEach(el => el.onclick = () => { restAudio.currentTime = LY.lines[+el.dataset.i].t + 0.01; if (restAudio.paused) restAudio.play().catch(() => {}); lyTick(true); });
-  lyTick(true);
+  LY.cur = -2; lyTick(true);
 }
 function lyTick(force) {
   if (player.hidden || !LY.lines.length) return;
-  const t = restAudio.currentTime + 0.15, L = LY.lines;
+  const t = restAudio.currentTime + 0.12, L = LY.lines, els = $('lyIn').children;
   let i = -1; for (let k = 0; k < L.length; k++) { if (L[k].t <= t) i = k; else break; }
-  const els = $('lyIn').children;
   if (i !== LY.cur || force) {
-    LY.cur = i;
-    for (let k = 0; k < els.length; k++) { const dd = Math.abs(k - i); els[k].classList.toggle('cur', k === i); els[k].classList.toggle('past', k < i); els[k].style.setProperty('--d', Math.min(dd, 6)); }
+    const prev = LY.cur; LY.cur = i;
+    for (let k = 0; k < els.length; k++) {
+      const e = els[k], dd = Math.abs(k - i);
+      e.classList.toggle('cur', k === i); e.classList.toggle('past', k < i); e.classList.toggle('next', k === i + 1);
+      e.classList.toggle('leave', k === prev && k !== i);
+      e.style.setProperty('--d', Math.min(dd, 6));
+      if (k !== i) e.querySelectorAll('.c').forEach(c => c.style.removeProperty('--k'));
+    }
     const el = els[Math.max(0, i)], box = $('lyBox');
-    if (el) $('lyIn').style.transform = `translateY(${box.clientHeight * 0.36 - el.offsetTop - el.offsetHeight / 2}px)`;
+    if (el) {
+      el.classList.remove('enter'); void el.offsetWidth; el.classList.add('enter');   // 重新触发出场动画
+      $('lyIn').style.transform = LYS.style === 'focus' ? '' : `translateY(${box.clientHeight * 0.36 - el.offsetTop - el.offsetHeight / 2}px)`;
+      if (i !== prev && i >= 0 && !force) fxBurstAt(el);
+    }
     $('pMini').textContent = i >= 0 ? L[i].text : '';
   }
   const el = els[i]; if (!el) return;
-  const l = L[i];
-  if (l.words) { el.querySelectorAll('.w').forEach((w, k) => { const wd = l.words[k]; w.style.setProperty('--k', Math.max(0, Math.min(1, (t - wd.t) / Math.max(wd.d, 0.05))) * 100); }); }
-  else { const nx = L[i + 1]?.t ?? (l.t + 5), span = Math.min(nx - l.t, Math.max(1.2, [...l.text].length * 0.32)); el.firstElementChild.style.setProperty('--k', Math.max(0, Math.min(1, (t - l.t) / span)) * 100); }
+  const cs = L[i].chars, spans = el.firstElementChild.children; let head = -1;
+  for (let j = 0; j < cs.length; j++) {
+    const k = Math.round(Math.max(0, Math.min(1, (t - cs[j].t) / cs[j].d)) * 100);
+    if (spans[j]._k !== k) { spans[j]._k = k; spans[j].style.setProperty('--k', k); }
+    if (k > 0 && k < 100) head = j;
+  }
+  FX.head = head >= 0 ? spans[head] : null;
 }
-(function lyLoop() { if (!player.hidden && !restAudio.paused) { lyTick(false); const d = restAudio.duration; if (isFinite(d) && d > 0) { $('pFill').style.width = restAudio.currentTime / d * 100 + '%'; $('pCurT').textContent = dur(restAudio.currentTime || 0.001); $('pDurT').textContent = dur(d); } } requestAnimationFrame(lyLoop); })();
+
+// ---------- 粒子特效(Canvas):环境光尘 + 唱词光点 + 换行迸发;随音乐能量律动 ----------
+const FX = { cvs: $('pFx'), ctx: null, ps: [], w: 0, h: 0, dpr: 1, rgb: [130, 190, 255], sprite: null, energy: 0, head: null, frame: 0, an: null, buf: null };
+FX.ctx = FX.cvs.getContext('2d');
+function fxSprite() {
+  const s = document.createElement('canvas'); s.width = s.height = 64; const x = s.getContext('2d'), [r, g, b] = FX.rgb;
+  const gr = x.createRadialGradient(32, 32, 0, 32, 32, 32);
+  gr.addColorStop(0, `rgba(255,255,255,1)`); gr.addColorStop(0.25, `rgba(${r},${g},${b},.85)`); gr.addColorStop(1, `rgba(${r},${g},${b},0)`);
+  x.fillStyle = gr; x.fillRect(0, 0, 64, 64); FX.sprite = s;
+}
+function fxSetColor(r, g, b) {   // 封面颜色提亮后作为粒子颜色
+  const m = Math.max(r, g, b, 1), k = 235 / m; FX.rgb = [Math.min(255, r * k + 30), Math.min(255, g * k + 30), Math.min(255, b * k + 30)].map(v => v | 0); fxSprite();
+}
+fxSprite();
+function fxResize() {
+  FX.dpr = Math.min(2, devicePixelRatio || 1); FX.w = player.clientWidth; FX.h = player.clientHeight;
+  FX.cvs.width = FX.w * FX.dpr; FX.cvs.height = FX.h * FX.dpr;
+}
+addEventListener('resize', () => { if (!player.hidden) fxResize(); });
+function fxAdd(x, y, vx, vy, life, size, a = 1) { if (FX.ps.length < 260) FX.ps.push({ x, y, vx, vy, life, max: life, size, a, tw: Math.random() * 6.28 }); }
+function fxAmbient() {   // 维持一层缓慢上浮的光尘
+  let n = 0; for (const p of FX.ps) if (p.amb) n++;
+  while (n++ < 46) { fxAdd(Math.random() * FX.w, FX.h + Math.random() * FX.h * 0.2, (Math.random() - 0.5) * 6, -(8 + Math.random() * 22), 9 + Math.random() * 8, 1 + Math.random() * 3, 0.5); FX.ps[FX.ps.length - 1].amb = true; FX.ps[FX.ps.length - 1].y = Math.random() * FX.h; }
+}
+function fxRel(el) { const r = el.getBoundingClientRect(), pr = player.getBoundingClientRect(); return [r.left - pr.left, r.top - pr.top, r.width, r.height]; }
+function fxBurstAt(el) {
+  if (!LYS.fx || player.hidden) return;
+  const [x, y, w, h] = fxRel(el.firstElementChild || el), n = 26 + (FX.energy * 30 | 0);
+  for (let i = 0; i < n; i++) { const a = Math.random() * 6.28, v = 40 + Math.random() * 140; fxAdd(x + Math.random() * Math.min(w, FX.w * 0.8), y + h / 2 + (Math.random() - 0.5) * h, Math.cos(a) * v, Math.sin(a) * v - 30, 0.8 + Math.random() * 0.9, 2 + Math.random() * 4); }
+}
+let fxCtx = null;
+function fxAudio() {   // 首次打开播放页时(用户点击)接入音频分析;失败也不影响播放
+  if (FX.an || !window.AudioContext) return;
+  try {
+    fxCtx = new AudioContext(); const src = fxCtx.createMediaElementSource(restAudio);
+    FX.an = fxCtx.createAnalyser(); FX.an.fftSize = 256; FX.buf = new Uint8Array(FX.an.frequencyBinCount);
+    src.connect(FX.an); FX.an.connect(fxCtx.destination);
+    restAudio.addEventListener('play', () => { if (fxCtx.state !== 'running') fxCtx.resume().catch(() => {}); });
+    fxCtx.resume().catch(() => {});
+  } catch (e) { console.warn('音频分析不可用', e); FX.an = null; }
+}
+let fxLast = performance.now();
+function fxFrame(now) {
+  const dt = Math.min(0.05, (now - fxLast) / 1000); fxLast = now;
+  if (player.hidden) return;
+  if (FX.an && !restAudio.paused) {   // 低频能量 -> 律动
+    FX.an.getByteFrequencyData(FX.buf); let s = 0; for (let i = 1; i < 12; i++) s += FX.buf[i];
+    const avg = s / 11; FX.base = (FX.base ?? avg) + (avg - (FX.base ?? avg)) * 0.02;   // 相对近期平均的起伏 = 节拍
+    const e = Math.max(0, Math.min(1, (avg - FX.base) / 45 + 0.12)); FX.energy += (e - FX.energy) * (e > FX.energy ? 0.45 : 0.08);
+  } else FX.energy *= 0.95;
+  player.style.setProperty('--beat', FX.energy.toFixed(3));
+  const c = FX.ctx; c.setTransform(FX.dpr, 0, 0, FX.dpr, 0, 0); c.clearRect(0, 0, FX.w, FX.h);
+  if (!LYS.fx) return;
+  fxAmbient();
+  if (FX.head && !restAudio.paused && (FX.frame++ % 2 === 0)) {   // 唱到的字迸出光点
+    const [x, y, w, h] = fxRel(FX.head);
+    for (let i = 0; i < 1 + (FX.energy * 2 | 0); i++) fxAdd(x + w * Math.random(), y + h * (0.3 + Math.random() * 0.5), (Math.random() - 0.5) * 50, -(30 + Math.random() * 60), 0.6 + Math.random() * 0.7, 1.5 + Math.random() * 3);
+  }
+  c.globalCompositeOperation = 'lighter';
+  const sp = 1 + FX.energy * 2.2;
+  for (let i = FX.ps.length - 1; i >= 0; i--) {
+    const p = FX.ps[i]; p.life -= dt * (p.amb ? 1 : 1);
+    p.x += p.vx * dt * (p.amb ? sp : 1); p.y += p.vy * dt * (p.amb ? sp : 1);
+    if (!p.amb) { p.vx *= 0.97; p.vy = p.vy * 0.97 + 12 * dt; }
+    else p.x += Math.sin(now / 1000 + p.tw) * 0.15;
+    if (p.life <= 0 || p.y < -20) { FX.ps.splice(i, 1); continue; }
+    const fade = p.amb ? Math.min(1, p.life / 2, (p.max - p.life) / 2) : p.life / p.max;
+    const tw = p.amb ? 0.55 + 0.45 * Math.sin(now / 400 + p.tw) : 1;
+    const s = p.size * (p.amb ? 1 + FX.energy * 0.6 : 1) * 1.5;
+    c.globalAlpha = Math.max(0, fade * tw * p.a * (p.amb ? 0.55 + FX.energy * 0.45 : 1));
+    c.drawImage(FX.sprite, p.x - s, p.y - s, s * 2, s * 2);
+  }
+  c.globalAlpha = 1; c.globalCompositeOperation = 'source-over';
+}
+(function lyLoop(now) {
+  if (!player.hidden) {
+    if (!restAudio.paused) { lyTick(false); const d = restAudio.duration; if (isFinite(d) && d > 0) { $('pFill').style.width = restAudio.currentTime / d * 100 + '%'; $('pCurT').textContent = dur(restAudio.currentTime || 0.001); $('pDurT').textContent = dur(d); } }
+    fxFrame(now || performance.now());
+  }
+  requestAnimationFrame(lyLoop);
+})();
 restAudio.addEventListener('loadedmetadata', () => { const d = restAudio.duration; if (isFinite(d)) $('pDurT').textContent = dur(d); });
+
+// ---------- 歌词风格面板 ----------
+function openLySheet() {
+  const box = $('lyBody');
+  box.innerHTML = `<div class="sect" style="padding-top:0">歌词动画</div><div class="list">${Object.entries(LY_STYLES).map(([k, [n, d]]) =>
+    `<label class="li"><span class="lt">${n}<small>${d}</small></span><input type="radio" name="lys" value="${k}" ${LYS.style === k ? 'checked' : ''}></label>`).join('')}</div>
+    <div class="sect">效果</div><div class="list">
+      <label class="li"><span class="lt">粒子特效<small>光尘漂浮、唱到的字迸出光点、换行时迸发,随音乐律动</small></span><input type="checkbox" class="sw" id="lyFxSw" ${LYS.fx ? 'checked' : ''}></label>
+      <label class="li"><span class="lt">显示翻译<small>外文歌词下方显示中文翻译</small></span><input type="checkbox" class="sw" id="lyTrSw" ${LYS.tr ? 'checked' : ''}></label></div>`;
+  box.querySelectorAll('input[name=lys]').forEach(r => r.onchange = () => { LYS.style = r.value; lsSet('lyStyle', r.value); renderLyrics(LY.lines.length ? '' : undefined); });
+  $('lyFxSw').onchange = e => { LYS.fx = e.target.checked; lsSet('lyFx', LYS.fx ? '1' : '0'); if (!LYS.fx) FX.ps.length = 0; };
+  $('lyTrSw').onchange = e => { LYS.tr = e.target.checked; lsSet('lyTr', LYS.tr ? '1' : '0'); applyLyStyle(); lyTick(true); };
+  $('lySheet').hidden = false;
+}
 
 
 // ---------- 我的网易云歌单(登录后同步) ----------
