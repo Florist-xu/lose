@@ -11,7 +11,36 @@
   "groupRestSec": 13,
   "audio": "workout.m4a",
   "video": "workout.mp4",
-  "tips": ["双肘展开,与肩同宽", "双手拉近、握拳", "头部放松,颈部保持中立", "收紧臀部,身体成一条直线", "双脚分开,与髋同宽", "收紧核心,腰不要塌"],
-  "segments": [{"start": 0, "end": 13}, {"start": 0, "end": 13}, {"start": 0, "end": 13}, {"start": 0, "end": 13}],
-  "templates": [{"name": "平板支撑"}]
+  "tips": [
+    "双肘展开,与肩同宽",
+    "双手拉近、握拳",
+    "头部放松,颈部保持中立",
+    "收紧臀部,身体成一条直线",
+    "双脚分开,与髋同宽",
+    "收紧核心,腰不要塌"
+  ],
+  "segments": [
+    {
+      "start": 0,
+      "end": 13
+    },
+    {
+      "start": 0,
+      "end": 13
+    },
+    {
+      "start": 0,
+      "end": 13
+    },
+    {
+      "start": 0,
+      "end": 13
+    }
+  ],
+  "templates": [
+    {
+      "name": "平板支撑"
+    }
+  ],
+  "cover": "cover.jpg"
 }

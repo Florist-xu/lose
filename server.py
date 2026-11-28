@@ -3,7 +3,7 @@
 - 静态页面 + 视频/音频 Range 请求
 - 训练记录接口,SQLite 存储在 data/workout.db(含每组随机抓拍的图片)
 默认端口: HTTP 6060 (PORT);若存在 certs/ 则同时开 HTTPS 6061 (SPORT)。"""
-import base64, binascii, ipaddress, json, mimetypes, os, re, socket, sqlite3, ssl, threading, urllib.error, urllib.request
+import base64, binascii, ipaddress, json, mimetypes, os, re, socket, sqlite3, ssl, struct, threading, urllib.error, urllib.request
 from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs, urljoin, unquote
 
@@ -71,6 +71,8 @@ def init_db():
           music_id INTEGER NOT NULL REFERENCES music(id) ON DELETE CASCADE,
           position INTEGER NOT NULL, PRIMARY KEY(playlist_id, music_id));
         ''')
+        if 'duration' not in {r['name'] for r in c.execute('PRAGMA table_info(music)')}:
+            c.execute('ALTER TABLE music ADD COLUMN duration REAL')   # 秒;-1 = 无法识别
         cols = {r['name'] for r in c.execute('PRAGMA table_info(sessions)')}
         if 'workout' not in cols:   # 多运动项目:旧记录都属于第一个项目 fatburn
             c.execute("ALTER TABLE sessions ADD COLUMN workout TEXT NOT NULL DEFAULT 'fatburn'")
@@ -165,7 +167,8 @@ def list_workouts():
         except (OSError, ValueError):
             continue
         out.append({'id': name, 'name': d.get('name', name), 'desc': d.get('desc', ''), 'groups': d.get('groups', 1),
-                    'movesPerGroup': d.get('movesPerGroup', 1), 'reps': d.get('reps', 10)})
+                    'movesPerGroup': d.get('movesPerGroup', 1), 'reps': d.get('reps', 10),
+                    'unit': d.get('unit', '次'), 'cover': d.get('cover', ''), 'moves': [t.get('name', '') for t in d.get('templates', [])]})
     return out
 
 
@@ -192,13 +195,145 @@ def list_sessions(day, user):
 
 
 # ---------------- 休息音乐 ----------------
+# ---------- 音频时长(纯标准库解析文件头,不依赖 ffprobe) ----------
+_MP3_BR = {1: [0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320],
+           2: [0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160]}
+_MP3_SR = [44100, 48000, 32000]
+
+
+def _mp4_duration(f, size):
+    pos = 0
+    while pos + 8 <= size:
+        f.seek(pos)
+        n, typ = struct.unpack('>I4s', f.read(8))
+        hl = 8
+        if n == 1:
+            n = struct.unpack('>Q', f.read(8))[0]
+            hl = 16
+        elif n == 0:
+            n = size - pos
+        if n < 8:
+            return None
+        if typ == b'moov':
+            p, end = pos + hl, pos + n
+            while p + 8 <= end:
+                f.seek(p)
+                m, t = struct.unpack('>I4s', f.read(8))
+                if t == b'mvhd':
+                    ver = f.read(4)[0]
+                    if ver == 1:
+                        f.read(16)
+                        ts, du = struct.unpack('>IQ', f.read(12))
+                    else:
+                        f.read(8)
+                        ts, du = struct.unpack('>II', f.read(8))
+                    return du / ts if ts else None
+                if m < 8:
+                    return None
+                p += m
+            return None
+        pos += n
+    return None
+
+
+def _mp3_duration(f, size):
+    head = f.read(10)
+    off = 0
+    if head[:3] == b'ID3':
+        off = 10 + ((head[6] & 0x7f) << 21 | (head[7] & 0x7f) << 14 | (head[8] & 0x7f) << 7 | (head[9] & 0x7f))
+    f.seek(off)
+    buf = f.read(65536)
+    for i in range(len(buf) - 4):
+        if buf[i] != 0xFF or (buf[i + 1] & 0xE0) != 0xE0:
+            continue
+        b1, b2, b3 = buf[i + 1], buf[i + 2], buf[i + 3]
+        ver, layer, bri, sri = (b1 >> 3) & 3, (b1 >> 1) & 3, b2 >> 4, (b2 >> 2) & 3
+        if ver == 1 or layer != 1 or bri in (0, 15) or sri == 3:   # 只处理 Layer III
+            continue
+        mpeg1 = ver == 3
+        sr = _MP3_SR[sri] // (1 if mpeg1 else 2 if ver == 2 else 4)
+        spf = 1152 if mpeg1 else 576
+        mono = (b3 >> 6) == 3
+        xo = i + 4 + ((17 if mono else 32) if mpeg1 else (9 if mono else 17))
+        tag = buf[xo:xo + 4]
+        if tag in (b'Xing', b'Info') and len(buf) >= xo + 12:
+            flags = struct.unpack('>I', buf[xo + 4:xo + 8])[0]
+            if flags & 1:
+                return struct.unpack('>I', buf[xo + 8:xo + 12])[0] * spf / sr
+        if buf[i + 36:i + 40] == b'VBRI' and len(buf) >= i + 54:
+            return struct.unpack('>I', buf[i + 50:i + 54])[0] * spf / sr
+        br = _MP3_BR[1 if mpeg1 else 2][bri] * 1000
+        return (size - off - i) * 8 / br
+    return None
+
+
+def _wav_duration(f, size):
+    h = f.read(12)
+    if h[:4] != b'RIFF' or h[8:12] != b'WAVE':
+        return None
+    rate = None
+    while True:
+        ch = f.read(8)
+        if len(ch) < 8:
+            return None
+        cid, n = ch[:4], struct.unpack('<I', ch[4:])[0]
+        if cid == b'fmt ':
+            d = f.read(n)
+            rate = struct.unpack('<I', d[8:12])[0]
+            continue
+        if cid == b'data':
+            return n / rate if rate else None
+        f.seek(n + (n & 1), 1)
+
+
+def _flac_duration(f, size):
+    if f.read(4) != b'fLaC':
+        return None
+    f.read(4)
+    d = f.read(34)
+    sr = (d[10] << 12) | (d[11] << 4) | (d[12] >> 4)
+    total = ((d[13] & 0x0F) << 32) | struct.unpack('>I', d[14:18])[0]
+    return total / sr if sr else None
+
+
+def probe_duration(path, ext):
+    try:
+        size = os.path.getsize(path)
+        with open(path, 'rb') as f:
+            fn = {'mp3': _mp3_duration, 'm4a': _mp4_duration, 'mp4': _mp4_duration, 'aac': None,
+                  'wav': _wav_duration, 'flac': _flac_duration}.get(ext)
+            d = fn(f, size) if fn else None
+        return round(d, 1) if d and 0 < d < 36000 else None
+    except (OSError, struct.error, IndexError, ValueError, ZeroDivisionError):
+        return None
+
+
+def music_kind(src):
+    src = src or ''
+    if src.startswith('netease:') or '126.net' in src or '163.com' in src:
+        return 'netease'
+    if src == '上传':
+        return 'upload'
+    if re.search(r'douyin|amemv|bytecdn|byteimg|snssdk|zjcdn|pstatp|ixigua', src):
+        return 'douyin'
+    return 'link'
+
+
 def music_row(r):
-    return {'id': r['id'], 'title': r['title'], 'ext': r['ext'], 'size': r['size'], 'url': f"music-files/{r['id']}.{r['ext']}"}
+    d = r['duration'] if 'duration' in r.keys() else None
+    return {'id': r['id'], 'title': r['title'], 'ext': r['ext'], 'size': r['size'], 'url': f"music-files/{r['id']}.{r['ext']}",
+            'duration': d if d and d > 0 else None, 'kind': music_kind(r['source'])}
 
 
 def list_music():
     with db() as c:
-        return [music_row(r) for r in c.execute('SELECT * FROM music ORDER BY id DESC')]
+        rows = c.execute('SELECT * FROM music ORDER BY id DESC').fetchall()
+        for r in rows:   # 旧数据补时长(只算一次;识别不了记 -1)
+            if r['duration'] is None:
+                d = probe_duration(os.path.join(MUSIC_DIR, f"{r['id']}.{r['ext']}"), r['ext'])
+                c.execute('UPDATE music SET duration=? WHERE id=?', (d if d else -1, r['id']))
+        rows = c.execute('SELECT * FROM music ORDER BY id DESC').fetchall()
+        return [music_row(r) for r in rows]
 
 
 def add_music(title, ext, size, source, tmp_path):
@@ -207,8 +342,12 @@ def add_music(title, ext, size, source, tmp_path):
     with db() as c:
         cur = c.execute('INSERT INTO music(title,ext,size,source) VALUES(?,?,?,?)', (title, ext, size, source))
         mid = cur.lastrowid
-    os.replace(tmp_path, os.path.join(MUSIC_DIR, f'{mid}.{ext}'))
-    return {'id': mid, 'title': title, 'ext': ext, 'size': size, 'url': f'music-files/{mid}.{ext}'}
+    dst = os.path.join(MUSIC_DIR, f'{mid}.{ext}')
+    os.replace(tmp_path, dst)
+    d = probe_duration(dst, ext)
+    with db() as c:
+        c.execute('UPDATE music SET duration=? WHERE id=?', (d if d else -1, mid))
+    return {'id': mid, 'title': title, 'ext': ext, 'size': size, 'url': f'music-files/{mid}.{ext}', 'duration': d, 'kind': music_kind(source)}
 
 
 def delete_music(mid):
